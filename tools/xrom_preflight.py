@@ -1276,6 +1276,408 @@ def check_signing_tools() -> None:
             fail(name, f"VsockProtocol.h is missing {wire_value}")
 
 
+# ---------------------------------------------------------------------------
+# Self-healing recovery and hybrid OTA
+# ---------------------------------------------------------------------------
+# Every check below locks a decision that is easy to lose in a later edit and hard to
+# notice losing. They are assertions about the shipped source, not about behaviour: the
+# behaviour is covered by the host tests, and a check here exists for the properties a
+# test cannot see because they span files.
+def check_recovery_core_wiring() -> None:
+    name = check_started("recovery core wiring")
+    runner = os.path.join(REPO_ROOT, "tools/hostcheck/run_host_tests.sh")
+    if not os.path.isfile(runner):
+        fail(name, "missing tools/hostcheck/run_host_tests.sh")
+        return
+    runner_text = read(runner)
+
+    bp_texts = {}
+    for directory in ("common/recovery", "common/ota"):
+        path = os.path.join(REPO_ROOT, directory, "Android.bp")
+        if not os.path.isfile(path):
+            fail(name, f"missing {directory}/Android.bp")
+            continue
+        bp_texts[directory] = read(path)
+
+    # Every source file in the two pure libraries has to be compiled by Soong AND by
+    # the host runner. A file in one and not the other is a file whose tests pass in
+    # one place and do not exist in the other.
+    for directory, bp_text in bp_texts.items():
+        for entry in sorted(os.listdir(os.path.join(REPO_ROOT, directory))):
+            if not entry.endswith(".cpp"):
+                continue
+            if f'"{entry}"' not in bp_text:
+                fail(name, f"{directory}/{entry} is not listed in {directory}/Android.bp")
+            if f"{directory}/{entry}" not in runner_text:
+                fail(name, f"{directory}/{entry} is not compiled by run_host_tests.sh")
+
+    for directory in ("common/recovery/tests", "common/ota/tests"):
+        bp_path = os.path.join(REPO_ROOT, directory, "Android.bp")
+        if not os.path.isfile(bp_path):
+            fail(name, f"missing {directory}/Android.bp")
+            continue
+        bp_text = read(bp_path)
+        for entry in sorted(os.listdir(os.path.join(REPO_ROOT, directory))):
+            if not entry.endswith("_test.cpp"):
+                continue
+            if f'"{entry}"' not in bp_text:
+                fail(name, f"{directory}/{entry} is not listed in its Android.bp")
+            if f"{directory}/{entry}" not in runner_text:
+                fail(name, f"{directory}/{entry} is not compiled by run_host_tests.sh")
+
+
+def check_bcb_layout_matches_aosp() -> None:
+    name = check_started("BCB layout")
+    path = os.path.join(REPO_ROOT, "common/recovery/BcbMessage.h")
+    if not os.path.isfile(path):
+        fail(name, "missing common/recovery/BcbMessage.h")
+        return
+    text = strip_noise(read(path), "//", True, char_literals=True)
+
+    # The field sizes are the AOSP bootloader_message sizes. They are not free
+    # parameters: A/B offsets depend on them, and libbootloader_message static_asserts
+    # the same total. A change here that is not matched by a change in AOSP produces a
+    # BCB the bootloader reads at the wrong offset.
+    for field, size in (("command", 32), ("status", 32), ("recovery", 768),
+                        ("stage", 32), ("reserved", 1184)):
+        if not re.search(rf"char\s+{field}\[{size}\]", text):
+            fail(name, f"bootloader_message.{field} is not char[{size}]; AOSP defines it "
+                       f"as {size} bytes and the bootloader reads it at a fixed offset")
+    if "sizeof(BootloaderMessage) == 2048" not in text:
+        fail(name, "the 2048-byte total is not static_asserted")
+    if "alignof(BootloaderMessage) == 1" not in text:
+        fail(name, "the packed layout is not static_asserted; padding would move every field")
+
+    # The misc region map. Offsets here are agreed across bootloader, recovery and
+    # uncrypt and are not configurable, which is why X-ROM keeps its own counter out of
+    # this partition entirely.
+    expected = {
+        "kVendorSpaceOffsetInMisc": 2 * 1024,
+        "kWipePackageOffsetInMisc": 16 * 1024,
+        "kSystemSpaceOffsetInMisc": 32 * 1024,
+        "kSystemSpaceSizeInMisc": 32 * 1024,
+        "kMiscSize": 64 * 1024,
+    }
+    for constant, value in expected.items():
+        # The header spells these as arithmetic (`2 * 1024`) rather than as literals,
+        # because the arithmetic is the documentation: it says which region follows
+        # which. Evaluating the expression rather than matching its text means the check
+        # survives a rewrite from one form to the other.
+        match = re.search(rf"{constant}\s*=\s*([0-9][0-9 *]*)\s*;", text)
+        if not match:
+            fail(name, f"{constant} is not defined as a constant expression")
+            continue
+        expression = match.group(1)
+        if not re.fullmatch(r"[0-9 *]+", expression):
+            fail(name, f"{constant} = {expression} is not a plain arithmetic expression")
+            continue
+        if eval(expression, {"__builtins__": {}}, {}) != value:
+            fail(name, f"{constant} evaluates to {eval(expression, {'__builtins__': {}}, {})} "
+                       f"but must be {value}; the misc region map has drifted from the "
+                       f"layout the bootloader, recovery and uncrypt agree on")
+
+
+def check_recovery_fail_secure_defaults() -> None:
+    name = check_started("recovery fail-secure defaults")
+
+    decision = os.path.join(REPO_ROOT, "common/recovery/RecoveryDecision.h")
+    quarantine = os.path.join(REPO_ROOT, "common/recovery/QuarantinePlan.h")
+    boot = os.path.join(REPO_ROOT, "common/recovery/BootAttemptPolicy.h")
+    for path in (decision, quarantine, boot):
+        if not os.path.isfile(path):
+            fail(name, f"missing {rel(path)}")
+            return
+
+    decision_text = read(decision)
+    # The default source must be the vault. A decision engine whose default is the
+    # network fails open, and every unknown signal would then have to be checked
+    # individually for the design to be safe at all.
+    if "source = RecoverySource::kUseVault" not in decision_text:
+        fail(name, "RecoveryDecision.source does not default to kUseVault; the engine "
+                   "must fail toward the vault, not toward the network")
+    # Every signal defaults to kUnknown, which is a doubt. If any defaulted to kClean,
+    # a gate that failed to run that probe would silently count it as passed.
+    signals = re.findall(r"Signal\s+(\w+)\s*=\s*Signal::(\w+)", decision_text)
+    if not signals:
+        fail(name, "no Signal fields found in RecoverySignals")
+    for field, default in signals:
+        if default != "kUnknown":
+            fail(name, f"RecoverySignals::{field} defaults to {default}; a check that "
+                       f"never ran must be a doubt, not a pass")
+    if "require_dual_signature = true" not in decision_text:
+        fail(name, "require_dual_signature does not default to true")
+
+    quarantine_text = read(quarantine)
+    if "allow_cancel_at_critical = false" not in quarantine_text:
+        fail(name, "allow_cancel_at_critical does not default to false. At CRITICAL the UI "
+                   "is part of the system under suspicion and a dialog offering a way to "
+                   "dismiss the response is a control surface handed to whatever "
+                   "compromised it")
+    if "cancel_requires_authentication = true" not in quarantine_text:
+        fail(name, "cancel_requires_authentication does not default to true; any process "
+                   "that can draw a dialog could otherwise stop a security response")
+
+    boot_text = read(boot)
+    floor = re.search(r"tries_remaining_floor\s*=\s*(\d+)", boot_text)
+    if not floor:
+        fail(name, "tries_remaining_floor has no default")
+    elif int(floor.group(1)) < 1:
+        fail(name, "tries_remaining_floor defaults below 1; at zero the bootloader has "
+                   "already given up on the slot, so waiting for zero means X-ROM never "
+                   "gets to act on a slot that is dying")
+
+    config = os.path.join(REPO_ROOT, "services/recovery/xrom_sentineld/xrom_sentineld_config.json")
+    if not os.path.isfile(config):
+        fail(name, f"missing {rel(config)}")
+    else:
+        # Parsed as JSON-with-comments: the shipped file uses "//" keys, which are
+        # ordinary string keys and therefore valid JSON.
+        try:
+            data = json.loads(read(config))
+        except ValueError as exc:
+            fail(name, f"xrom_sentineld_config.json does not parse: {exc}")
+            return
+        if data.get("deep_integrity_on_boot") is not False:
+            fail(name, "deep_integrity_on_boot must be false by default: it is gigabytes "
+                       "of flash I/O on the boot path duplicating work dm-verity already "
+                       "does on every read")
+        if data.get("quarantine", {}).get("allow_cancel_at_critical") is not False:
+            fail(name, "the shipped configuration enables cancellation at CRITICAL")
+        if data.get("boot_attempts", {}).get("tries_remaining_floor", 1) < 1:
+            fail(name, "the shipped configuration sets tries_remaining_floor below 1")
+        if data.get("stash_evidence_in_pvm") is not False:
+            warn(name, "stash_evidence_in_pvm is enabled but the frozen isolation AIDL has "
+                       "no evidence TaskClass, so the handoff cannot succeed")
+
+
+def check_misc_neverallow_is_an_allowlist() -> None:
+    name = check_started("misc neverallow")
+    path = os.path.join(REPO_ROOT, "sepolicy/system_ext_private/xrom_sentineld.te")
+    if not os.path.isfile(path):
+        fail(name, f"missing {rel(path)}")
+        return
+    text = strip_noise(read(path), "#", False)
+
+    rules = re.findall(r"neverallow\s+(\{[^}]*\}|[\w\-]+)\s+misc_block_device:blk_file\s+write\s*;",
+                       text)
+    if not rules:
+        fail(name, "no neverallow restricts misc_block_device writes; the BCB is how a "
+                   "recovery boot is armed and an unrestricted writer is an unrestricted "
+                   "reboot")
+        return
+    if len(rules) > 1:
+        warn(name, f"{len(rules)} neverallow rules mention misc_block_device write")
+
+    exceptions = rules[0]
+    # The rule as originally specified was `{ domain -xrom_avfd }`, which does not
+    # harden anything: neverallow is checked against every allow rule in the policy
+    # including AOSP's, and recovery, uncrypt, update_engine, hal_boot_default and init
+    # all legitimately write misc. The build would fail. An explicit allowlist is a real
+    # restriction the policy can satisfy.
+    if "xrom_avfd" in exceptions:
+        fail(name, "the misc neverallow names xrom_avfd, which has no business writing "
+                   "/misc at all and is the one domain in this tree whose design is that a "
+                   "bug in it cannot reach the hardware")
+    for required in ("recovery", "uncrypt", "update_engine", "hal_boot_default", "init"):
+        if f"-{required}" not in exceptions:
+            fail(name, f"the misc neverallow does not exempt {required}, which AOSP grants "
+                       f"misc write and which the policy build will therefore reject")
+    if "-xrom_sentineld" not in exceptions:
+        fail(name, "the misc neverallow does not exempt xrom_sentineld, so the daemon that "
+                   "is supposed to arm the recovery boot cannot")
+
+
+def check_vault_write_monopoly() -> None:
+    name = check_started("vault write monopoly")
+    installer = os.path.join(REPO_ROOT, "sepolicy/system_ext_private/xrom_ota_installer.te")
+    sentinel = os.path.join(REPO_ROOT, "sepolicy/system_ext_private/xrom_sentineld.te")
+    for path in (installer, sentinel):
+        if not os.path.isfile(path):
+            fail(name, f"missing {rel(path)}")
+            return
+
+    installer_text = strip_noise(read(installer), "#", False)
+    sentinel_text = strip_noise(read(sentinel), "#", False)
+
+    # Exactly one allow grants write on the vault image, and it is the installer's.
+    # The lookbehind is load-bearing: "neverallow" contains "allow", and a bare
+    # `allow\s+` pattern matches inside it and reports a DENIAL as a GRANT. That is not
+    # a cosmetic error — it makes the monopoly check fail on correct policy and pass on
+    # policy that is missing the denial.
+    allows = re.findall(r"(?<!never)allow\s+(\w+)\s+xrom_vault_device:blk_file\s+\{([^}]*)\}",
+                        installer_text + "\n" + sentinel_text)
+    writers = [domain for domain, perms in allows if "write" in perms.split()]
+    if writers != ["xrom_ota_installer"]:
+        fail(name, f"the domains allowed to write xrom_vault_device are {writers}; exactly "
+                   f"one domain may, and it is xrom_ota_installer")
+
+    if not re.search(r"neverallow\s+\{\s*domain\s+-xrom_ota_installer\s*\}\s+"
+                     r"xrom_vault_device:blk_file\s+write\s*;", installer_text):
+        fail(name, "no neverallow reserves xrom_vault_device writes to xrom_ota_installer; "
+                   "without it the monopoly is a comment rather than a build check")
+    if not re.search(r"neverallow\s+xrom_sentineld\s+xrom_vault_device:blk_file\s+"
+                     r"\{[^}]*write", sentinel_text):
+        fail(name, "xrom_sentineld is not explicitly denied vault image writes. It owns the "
+                   "METADATA partition, which is a separate device precisely so that this "
+                   "denial can be absolute")
+
+    # The installer has no network. That is the property that makes compromising the
+    # writer useless as a delivery channel, and it is the reason the OTA path is two
+    # executables rather than one.
+    for socket_class in ("tcp_socket", "udp_socket", "rawip_socket"):
+        if not re.search(rf"neverallow\s+xrom_ota_installer\s+self:{socket_class}\s+\*",
+                         installer_text):
+            fail(name, f"xrom_ota_installer is not denied self:{socket_class}; the recovery "
+                       f"image downloads and the installer writes, and merging those gives "
+                       f"a compromised writer a delivery channel")
+        if re.search(rf"(?<!never)allow\s+xrom_ota_installer\s+self:{socket_class}",
+                     installer_text):
+            fail(name, f"xrom_ota_installer is granted self:{socket_class}")
+
+    # The record cannot live on the image partition: the sentinel must write its
+    # boot-loop counter and SELinux cannot separate offsets within one block device.
+    if "xrom_vault_meta_device" not in installer_text or "xrom_vault_meta_device" not in sentinel_text:
+        fail(name, "the vault metadata device is not referenced by both domains; the record "
+                   "and the image must be on separate partitions for the write monopoly to "
+                   "be absolute")
+
+
+def check_ota_trust_material() -> None:
+    name = check_started("OTA trust material")
+    anchors_path = os.path.join(REPO_ROOT, "security/ota_trust/ota_trust_anchors.json")
+    if not os.path.isfile(anchors_path):
+        fail(name, "missing security/ota_trust/ota_trust_anchors.json")
+        return
+
+    try:
+        data = json.loads(read(anchors_path))
+    except ValueError as exc:
+        fail(name, f"ota_trust_anchors.json does not parse: {exc}")
+        return
+
+    anchors = data.get("anchors", [])
+    if not anchors:
+        fail(name, "ota_trust_anchors.json has no anchors, so nothing can ever be verified "
+                   "and the installer will refuse every package")
+        return
+
+    enabled = {"ED25519": 0, "RSA4096_SHA256": 0}
+    development = []
+    for anchor in anchors:
+        algorithm = anchor.get("algorithm")
+        if algorithm not in enabled:
+            fail(name, f"anchor '{anchor.get('key_id')}' names an unknown algorithm "
+                       f"'{algorithm}'")
+            continue
+        public_key = anchor.get("public_key", "")
+        if "PRIVATE KEY" in public_key:
+            fail(name, f"anchor '{anchor.get('key_id')}' contains a PRIVATE key. Only public "
+                       f"halves belong in this repository")
+        if not public_key:
+            fail(name, f"anchor '{anchor.get('key_id')}' has an empty public_key")
+        if anchor.get("enabled"):
+            enabled[algorithm] += 1
+            if "dev" in str(anchor.get("key_id", "")).lower():
+                development.append(anchor["key_id"])
+
+    # require_dual_signature defaults to on, so both algorithms need at least one enabled
+    # anchor or the device cannot accept any manifest at all.
+    for algorithm, count in enabled.items():
+        if count == 0:
+            fail(name, f"no enabled {algorithm} anchor; dual signature is required by "
+                       f"default, so a manifest can never be accepted")
+    if enabled["ED25519"] and enabled["RSA4096_SHA256"]:
+        ids = [a.get("key_id") for a in anchors if a.get("enabled")]
+        if len(set(ids)) < 2:
+            fail(name, "the enabled anchors share a key id; two algorithms under one id is "
+                       "one key counted twice and require_distinct_keys would refuse it")
+
+    # The path in the installer and the path in the product makefile have to agree, or
+    # the installer looks for anchors that were installed somewhere else.
+    installer = os.path.join(REPO_ROOT, "services/ota/xrom_ota_installer/main.cpp")
+    if os.path.isfile(installer):
+        match = re.search(r'kDefaultTrustPath\[\]\s*=\s*"([^"]+)"', read(installer))
+        if not match:
+            fail(name, "kDefaultTrustPath is not defined in the OTA installer")
+        else:
+            expected = "/system_ext/etc/xrom/ota-trust/ota_trust_anchors.json"
+            if match.group(1) != expected:
+                fail(name, f"kDefaultTrustPath is '{match.group(1)}' but the product "
+                           f"makefile installs the anchors to '{expected}'")
+    makefile = os.path.join(REPO_ROOT, "device/x1/recovery.mk")
+    if os.path.isfile(makefile):
+        if "ota_trust_anchors.json" not in read(makefile):
+            fail(name, "device/x1/recovery.mk does not install ota_trust_anchors.json")
+
+    if development:
+        warn(name, f"development OTA anchors are enabled: {', '.join(development)}. They must "
+                   f"be replaced with production keys before a release image is built")
+
+
+def check_recovery_product_wiring() -> None:
+    name = check_started("recovery product wiring")
+    recovery_mk = os.path.join(REPO_ROOT, "device/x1/recovery.mk")
+    device_mk = os.path.join(REPO_ROOT, "device/x1/device.mk")
+    board_mk = os.path.join(REPO_ROOT, "device/x1/BoardConfig.mk")
+    fstab = os.path.join(REPO_ROOT, "device/x1/recovery.fstab")
+    for path in (recovery_mk, device_mk, board_mk, fstab):
+        if not os.path.isfile(path):
+            fail(name, f"missing {rel(path)}")
+            return
+
+    recovery_text = read(recovery_mk)
+    for package in ("xrom_sentineld", "xrom_ota_installer", "xrom_recovery_gate",
+                    "init.xrom.sentinel.rc"):
+        if package not in recovery_text:
+            fail(name, f"device/x1/recovery.mk does not install {package}")
+    if "TARGET_RECOVERY_FSTAB" not in recovery_text:
+        fail(name, "TARGET_RECOVERY_FSTAB is not set, so the recovery image has no partition "
+                   "map and the gate cannot find the vault")
+
+    if "recovery.mk" not in read(device_mk):
+        fail(name, "device/x1/device.mk does not inherit recovery.mk, so none of the "
+                   "recovery packages are built")
+
+    board_text = read(board_mk)
+    if "BOARD_XROM_VAULTIMAGE_PARTITION_SIZE" not in board_text:
+        fail(name, "BoardConfig.mk does not declare the vault image partition")
+    if "BOARD_XROM_VAULT_META_PARTITION_SIZE" not in board_text:
+        fail(name, "BoardConfig.mk does not declare the vault metadata partition; the record "
+                   "cannot share the image partition because SELinux cannot separate offsets")
+    if "BOARD_AVB_XROM_VAULT_KEY_PATH" not in board_text:
+        warn(name, "the vault has no AVB descriptor, so there is no cheap authenticated "
+                   "digest for it and the post-boot comparison can only run at deep depth")
+    location = re.search(r"BOARD_AVB_XROM_VAULT_ROLLBACK_INDEX_LOCATION\s*:=\s*(\d+)", board_text)
+    if location:
+        others = set(re.findall(r"BOARD_AVB_\w+_ROLLBACK_INDEX_LOCATION\s*:=\s*(\d+)", board_text))
+        if len(others) != len(re.findall(r"ROLLBACK_INDEX_LOCATION\s*:=\s*\d+", board_text)):
+            fail(name, "two AVB rollback index locations collide; the anti-rollback check "
+                       "would compare unrelated counters")
+
+    fstab_text = strip_noise(read(fstab), "#", False)
+    for device in ("xrom_vault", "xrom_vault_meta"):
+        entries = [line for line in fstab_text.splitlines() if device in line and line.strip()]
+        # xrom_vault_meta also matches xrom_vault, so filter to the exact by-name.
+        entries = [line for line in entries if f"by-name/{device}" in line]
+        if not entries:
+            fail(name, f"recovery.fstab has no entry for {device}")
+            continue
+        fields = entries[0].split()
+        mount_flags = fields[3] if len(fields) > 3 else ""
+        if device == "xrom_vault":
+            # The image partition is written through the block device by the installer,
+            # never through a mount. Mounting it rw would put a second writer in front of
+            # the same bytes dm-verity is checking.
+            if mount_flags.split(",")[0] != "ro":
+                fail(name, f"the vault image entry mounts '{mount_flags}'; the first mount "
+                           f"flag must be ro, because the installer writes the block device "
+                           f"directly and a rw mount is a second writer in front of bytes "
+                           f"dm-verity is checking")
+            if "recoveryonly" not in entries[0]:
+                warn(name, "the vault image is not marked recoveryonly, so the normal boot "
+                           "will try to mount the recovery fallback")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="X-ROM static pre-flight checks")
     parser.add_argument("--aosp-root", help="path to a full AOSP checkout for cross-tree checks")
@@ -1307,6 +1709,16 @@ def main() -> int:
     check_data_plane_wiring()
     check_host_tests_are_wired()
     check_signing_tools()
+
+    # Self-healing recovery and hybrid OTA.
+    check_recovery_core_wiring()
+    check_bcb_layout_matches_aosp()
+    check_recovery_fail_secure_defaults()
+    check_misc_neverallow_is_an_allowlist()
+    check_vault_write_monopoly()
+    check_ota_trust_material()
+    check_recovery_product_wiring()
+
     if args.aosp_root:
         check_against_aosp(os.path.abspath(args.aosp_root))
 

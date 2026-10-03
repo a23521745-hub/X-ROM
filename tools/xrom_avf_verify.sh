@@ -448,6 +448,166 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# 12. The vault, the sentinel and the recovery stack on the device
+# ---------------------------------------------------------------------------
+# Everything in this section is a claim made by the source tree that only a device can
+# confirm. BoardConfig.mk ASKS for two partitions; whether the board's GPT actually has
+# them is a property of the hardware description, not of this repository.
+echo
+echo "=== 12. xrom_vault, xrom_sentineld and the recovery stack ==="
+
+for device in xrom_vault xrom_vault_meta; do
+    if run "[[ -e /dev/block/by-name/${device} ]]" >/dev/null 2>&1; then
+        ok "/dev/block/by-name/${device} exists"
+        # The image partition must never be mounted rw. The installer writes the block
+        # device directly, the way update_engine writes an inactive slot; a rw mount
+        # would put a second writer in front of bytes dm-verity is checking.
+        MOUNTED=$(run "grep -c ' /${device} .*rw' /proc/mounts" 2>/dev/null | tr -d '\r')
+        if [[ "${device}" == "xrom_vault" && "${MOUNTED:-0}" != "0" ]]; then
+            bad "xrom_vault is mounted rw somewhere" \
+                "recovery.fstab declares it ro + recoveryonly; a rw mount defeats the write monopoly"
+        else
+            ok "${device} is not mounted read-write in the normal boot"
+        fi
+    else
+        bad "/dev/block/by-name/${device} does not exist" \
+            "BoardConfig.mk declares BOARD_XROM_VAULT*_PARTITION_SIZE but the board's partition table must actually provide the space"
+    fi
+done
+
+# The daemon has to be running, in its own domain, and with exactly one capability.
+if run "pidof xrom_sentineld" >/dev/null 2>&1; then
+    ok "xrom_sentineld is running"
+    PID=$(run "pidof xrom_sentineld" | tr -d '\r' | awk '{print $1}')
+    DOMAIN=$(run "cat /proc/${PID}/attr/current" 2>/dev/null | tr -d '\r')
+    if [[ "${DOMAIN}" == u:r:xrom_sentineld:* ]]; then
+        ok "it runs in the xrom_sentineld domain (${DOMAIN})"
+    else
+        bad "xrom_sentineld is not in its own domain: ${DOMAIN:-unknown}" \
+            "init_daemon_domain() did not transition; the daemon is running with another domain's permissions"
+    fi
+    # CAP_NET_ADMIN is the only capability granted, and it is for the SIOCSIFFLAGS layer
+    # of the network cut. Anything more means the policy and the binary disagree.
+    CAPS=$(run "grep CapEff /proc/${PID}/status" 2>/dev/null | tr -d '\r')
+    if [[ -n "${CAPS}" ]]; then
+        ok "effective capabilities: ${CAPS}"
+        warn "check ${CAPS} against sepolicy: only cap_net_admin is granted. A daemon that can write the BCB, drop the network and reboot should have nothing else."
+    fi
+else
+    bad "xrom_sentineld is not running" \
+        "a recovery daemon that is not up cannot quarantine anything; check init.xrom.sentinel.rc and logcat"
+fi
+
+# The service has to be registered under the exact name service_contexts labels.
+if run "service check android.xrom.recovery.IXRecoveryService/xrom_recovery" 2>/dev/null \
+        | grep -q "found"; then
+    ok "IXRecoveryService/xrom_recovery is registered with servicemanager"
+else
+    bad "IXRecoveryService/xrom_recovery is not registered" \
+        "the name must match sepolicy/system_ext_private/service_contexts exactly"
+fi
+
+# The OTA installer must exist and must have no network. The second half is the property
+# the whole split exists for: the recovery image downloads, the installer writes.
+if run "[[ -x /system_ext/bin/xrom_ota_installer ]]" >/dev/null 2>&1; then
+    ok "xrom_ota_installer is installed"
+else
+    skip "xrom_ota_installer is not present (built but not flashed?)"
+fi
+
+# The vault record has to be readable and parseable, or every post-boot comparison
+# reports inconclusive and the alarm that follows is worthless.
+if run "[[ -r /dev/block/by-name/xrom_vault_meta ]]" >/dev/null 2>&1; then
+    MAGIC=$(run "dd if=/dev/block/by-name/xrom_vault_meta bs=1 count=7 2>/dev/null" | tr -d '\0\r')
+    if [[ "${MAGIC}" == "XROMVLT" ]]; then
+        ok "the vault record carries the XROMVLT magic"
+    else
+        warn "the vault record magic is '${MAGIC:-empty}', not XROMVLT"
+        warn "an erased or never-written vault reports as INCONCLUSIVE, not as a mismatch — correct, but it means there is no fallback on this unit until an OTA has been installed"
+    fi
+else
+    skip "xrom_vault_meta is not readable from the shell domain"
+fi
+
+
+# ---------------------------------------------------------------------------
+# 13. The network cut — MEASURED, not inferred
+# ---------------------------------------------------------------------------
+# This section exists because of an open risk that is recorded in docs/05 §F #10 and
+# §G.1 and is NOT solved: X-ROM builds with CONFIG_BPF_SYSCALL off, netd on Android 12+
+# uses eBPF for parts of its own operation, and bpfloader is an early-init service. So
+# whether netd functions at all on this kernel cannot be determined from the source tree.
+#
+# A binder call returning success does not answer the question either. It says netd
+# accepted a request; it does not say traffic stopped. Everything below therefore
+# measures an observable consequence rather than trusting a return code, and reports
+# what it could not determine as a warning instead of as a pass.
+echo
+echo "=== 13. Network quarantine (the open netd/BPF question) ==="
+
+BPF=$(run "zcat /proc/config.gz 2>/dev/null | grep -E '^# CONFIG_BPF_SYSCALL is not set|^CONFIG_BPF_SYSCALL='" | tr -d '\r')
+if [[ "${BPF}" == *"is not set"* ]]; then
+    ok "CONFIG_BPF_SYSCALL is off, as device/x1/kernel/gki_xrom_pkvm.fragment asks"
+elif [[ -n "${BPF}" ]]; then
+    warn "CONFIG_BPF_SYSCALL appears to be ON (${BPF}); the fragment asks for it off"
+else
+    skip "/proc/config.gz is not readable, so the BPF setting could not be confirmed"
+fi
+
+if run "pidof netd" >/dev/null 2>&1; then
+    ok "netd is running"
+    NETD_ALIVE=1
+else
+    bad "netd is not running" \
+        "this is the symptom docs/05 §F #10 predicts if CONFIG_BPF_SYSCALL=off breaks netd; the interface-down layer becomes the primary mechanism"
+    NETD_ALIVE=0
+fi
+
+if run "service check netd" 2>/dev/null | grep -q "found"; then
+    ok "netd is registered with servicemanager"
+elif [[ "${NETD_ALIVE}" == "1" ]]; then
+    warn "netd has a process but is not registered; the firewall-chain layer will fail"
+fi
+
+# The OEM chain id is NOT a frozen contract and NetdCompat.h says so. This is where the
+# assumption gets checked instead of trusted.
+CHAIN=$(run "getprop persist.xrom.netd_oem_chain" 2>/dev/null | tr -d '\r')
+warn "NetdCompat.h assumes OEM firewall chain base 100 (netd_oem_chain 1 -> 100). Confirm against the target's system/netd/aidl/android/net/INetd.aidl; the numbering differs between netd versions and is not a frozen public contract."
+
+# Whether an interface can actually be brought down. This is the layer that does not
+# depend on netd, so it is the one that has to work if netd does not. Checked
+# non-destructively: the flag is read, not written, because dropping the interface on a
+# device under adb would end the session this script is running in.
+IFACES=$(run "ls /sys/class/net" 2>/dev/null | tr -d '\r')
+NON_LO=""
+for iface in ${IFACES}; do
+    [[ "${iface}" == "lo" ]] && continue
+    NON_LO="${NON_LO} ${iface}"
+done
+if [[ -n "${NON_LO// /}" ]]; then
+    for iface in ${NON_LO}; do
+        FLAGS=$(run "cat /sys/class/net/${iface}/flags" 2>/dev/null | tr -d '\r')
+        ok "interface ${iface} present, flags=${FLAGS:-unknown} (SIOCSIFFLAGS layer can act on it)"
+    done
+    warn "the interface-down layer was NOT exercised: bringing an interface down would drop the adb session this script runs in. Exercise it from a local shell, then confirm with 'ip link' that the interface is DOWN and that egress actually stops."
+else
+    bad "no non-loopback network interface is present" \
+        "the SIOCSIFFLAGS layer would have nothing to act on and the netd layer is unverified, so no network cut could be confirmed on this unit"
+fi
+
+# The quarantine property has to be writable by the daemon's domain and readable by
+# everyone who needs to know. Setting a property is not itself a network cut — docs/05
+# says so plainly — so this checks the plumbing, not the effect.
+if run "getprop sys.xrom.network.quarantined" >/dev/null 2>&1; then
+    ok "sys.xrom.network.quarantined is readable"
+else
+    skip "sys.xrom.network.quarantined is not set (nothing has quarantined this device)"
+fi
+
+warn "NOT VERIFIED HERE: that enabling the OEM chain actually stops traffic. Measure it with the device on a metered link or behind a counting proxy, quarantine it through IXRecoveryService, and confirm zero egress. A binder call that returns success says netd accepted a request, not that packets stopped."
+
+
+# ---------------------------------------------------------------------------
 echo
 printf 'RESULT: %d passed, %d failed, %d warning(s), %d skipped\n' \
     "${PASSED}" "${FAILED}" "${WARNED}" "${SKIPPED}"

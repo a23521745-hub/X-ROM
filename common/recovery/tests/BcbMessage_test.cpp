@@ -76,6 +76,18 @@ bool RenderOk(const BcbRequest& request, const BootloaderMessage& existing, BcbI
   return xrom::recovery::Render(request, existing, image, errors);
 }
 
+// Returns the option at |index|, or a marker when there is no such option.
+//
+// Tests must not index a container without a bound. An out-of-range read here does not
+// produce a failed assertion, it produces a segfault: no summary line, no failure count,
+// and a runner that looks like it broke rather than like it caught something. That
+// distinction mattered — the append-semantics regression below was caught by this file
+// and reported as a crash, which the regression harness could not tell apart from a
+// build problem.
+std::string OptionAt(const std::vector<std::string>& options, size_t index) {
+  return index < options.size() ? options[index] : "<missing>";
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -167,11 +179,11 @@ TEST(BcbMessage, RenderPreservesOptionsAlreadyQueuedInMisc) {
       xrom::recovery::ParseRecoveryOptions(image.message);
   // All three queued options survive, in their original order...
   EXPECT_EQ(options.size(), 4u);
-  EXPECT_EQ(options[0], "wipe_cache");
-  EXPECT_EQ(options[1], "prompt_and_wipe_data");
-  EXPECT_EQ(options[2], "update_package=/data/ota.zip");
+  EXPECT_EQ(OptionAt(options, 0), "wipe_cache");
+  EXPECT_EQ(OptionAt(options, 1), "prompt_and_wipe_data");
+  EXPECT_EQ(OptionAt(options, 2), "update_package=/data/ota.zip");
   // ...and X-ROM's own reason is appended rather than substituted.
-  EXPECT_EQ(options[3], "xrom-reason=threat-detected");
+  EXPECT_EQ(OptionAt(options, 3), "xrom-reason=threat-detected");
 }
 
 TEST(BcbMessage, RenderPreservesStageAndCommandWhenNotSpecified) {
@@ -229,8 +241,8 @@ TEST(BcbMessage, RenderReplacesAnOlderXromReason) {
   }
   EXPECT_EQ(reasons, 1u);
   // The uncrypt option queued before all of this is still there.
-  EXPECT_TRUE(xrom::recovery::ParseRecoveryOptions(second.message)[2] ==
-              "update_package=/data/ota.zip");
+  EXPECT_EQ(OptionAt(xrom::recovery::ParseRecoveryOptions(second.message), 2),
+            "update_package=/data/ota.zip");
 }
 
 TEST(BcbMessage, RenderRefusesToTruncateAFieldThatDoesNotFit) {
@@ -377,8 +389,8 @@ TEST(BcbMessage, ParseRecoveryOptionsIgnoresTheHeaderAndBlankLines) {
   std::memcpy(message.recovery, field.data(), field.size());
   const std::vector<std::string> options = xrom::recovery::ParseRecoveryOptions(message);
   EXPECT_EQ(options.size(), 2u);
-  EXPECT_EQ(options[0], "wipe_cache");
-  EXPECT_EQ(options[1], "sideload");
+  EXPECT_EQ(OptionAt(options, 0), "wipe_cache");
+  EXPECT_EQ(OptionAt(options, 1), "sideload");
 }
 
 TEST(BcbMessage, RecoveryFieldAlwaysStartsWithTheHeaderRecoveryParses) {

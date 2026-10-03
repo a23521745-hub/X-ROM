@@ -46,6 +46,25 @@ using ::xrom::recovery::OnFailure;
 using ::xrom::recovery::QuarantinePolicy;
 using ::xrom::recovery::ThreatSeverity;
 
+// IndexOf returns -1 when a step is absent, and steps[-1] is undefined behaviour rather
+// than a failed assertion. Guarded here for the same reason OptionAt exists in
+// BcbMessage_test.cpp: a test that crashes cannot report what it caught, and a crash
+// produces no summary line at all, which a runner reads as an infrastructure failure
+// rather than as a detection.
+//
+// A function rather than a macro, for a second reason: the balance check in
+// tools/xrom_preflight.py drops lines starting with '#' but keeps their continuations,
+// so a multi-line #define leaves stray parentheses behind and reports the file as
+// unbalanced. A function has no continuation lines.
+const ::xrom::recovery::Step& StepAt(const std::vector<::xrom::recovery::Step>& steps,
+                                     int index) {
+  static const ::xrom::recovery::Step kAbsent{};
+  if (index < 0 || index >= static_cast<int>(steps.size())) {
+    return kAbsent;
+  }
+  return steps[index];
+}
+
 // Index of |action| in the plan, or -1 when it is absent.
 int IndexOf(const std::vector<::xrom::recovery::Step>& steps, Action action) {
   for (size_t i = 0; i < steps.size(); ++i) {
@@ -121,7 +140,7 @@ TEST(QuarantinePlan, LosingTheEvidenceEscalatesRatherThanContinuing) {
   // A quarantine that cannot secure its own evidence destroys it, and going on to
   // reboot as though nothing happened leaves no record that it did.
   const auto plan = BuildPlan(ThreatSeverity::kHigh, QuarantinePolicy{});
-  EXPECT_EQ(plan.steps[1].on_failure, OnFailure::kEscalate);
+  EXPECT_EQ(StepAt(plan.steps, 1).on_failure, OnFailure::kEscalate);
 }
 
 TEST(QuarantinePlan, AFailedBcbWriteDoesNotReboot) {
@@ -130,7 +149,8 @@ TEST(QuarantinePlan, AFailedBcbWriteDoesNotReboot) {
   // honest response to a failed arming is to stop and stay up.
   const auto plan = BuildPlan(ThreatSeverity::kCritical, QuarantinePolicy{});
   const int arm = IndexOf(plan.steps, Action::kArmRecoveryBoot);
-  EXPECT_EQ(plan.steps[arm].on_failure, OnFailure::kAbortWithoutReboot);
+  EXPECT_GE(arm, 0);
+  EXPECT_EQ(StepAt(plan.steps, arm).on_failure, OnFailure::kAbortWithoutReboot);
 }
 
 TEST(QuarantinePlan, AFailedNetworkCutDoesNotStopTheQuarantine) {
@@ -138,7 +158,7 @@ TEST(QuarantinePlan, AFailedNetworkCutDoesNotStopTheQuarantine) {
   // recovery anyway. Refusing to quarantine because netd did not answer would be
   // a strict downgrade.
   const auto plan = BuildPlan(ThreatSeverity::kHigh, QuarantinePolicy{});
-  EXPECT_EQ(plan.steps[2].on_failure, OnFailure::kContinue);
+  EXPECT_EQ(StepAt(plan.steps, 2).on_failure, OnFailure::kContinue);
 }
 
 TEST(QuarantinePlan, EveryStepHasAPositiveTimeoutAndTheTotalIsBounded) {
