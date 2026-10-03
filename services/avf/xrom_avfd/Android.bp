@@ -1,0 +1,134 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// xrom_avfd — X-ROM's AVF orchestration daemon.
+//
+// Split into two layers on purpose:
+//
+//   libxrom_avf_core   VmSpec + IsolationPolicy + PayloadManifest. Plain C++17,
+//                      no Android headers, host_supported, and therefore testable
+//                      on a build machine with no device and no AOSP toolchain.
+//   xrom_avfd          Everything that touches binder, libbase, libcrypto or the
+//                      AVF AIDL.
+//
+// The shared host/guest code — SHA-256, the wire codec and the framed vsock
+// transport — lives under common/ and is linked by both this daemon and the
+// Microdroid payload.
+//
+// Every AIDL type in the whole daemon is named in MicrodroidVmBuilder.cpp and
+// AvfController.h. When AVF moves, those two files move and nothing else does.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_defaults {
+    name: "xrom_avfd_defaults",
+    cpp_std: "c++20",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wthread-safety",
+        "-Wimplicit-fallthrough",
+    ],
+    local_include_dirs: ["."],
+}
+
+// ---------------------------------------------------------------------------
+// Pure policy core
+// ---------------------------------------------------------------------------
+// No shared_libs at all: adding libbase or liblog here would silently make the
+// host tests depend on an Android toolchain and defeat the split. The sources
+// are listed on the library itself rather than in a shared cc_defaults, because
+// a test module that inherited the defaults AND linked the library would compile
+// the same two translation units twice and fail with duplicate symbols.
+cc_library_static {
+    name: "libxrom_avf_core",
+    defaults: ["xrom_avfd_defaults"],
+    host_supported: true,
+    srcs: [
+        "IsolationPolicy.cpp",
+        "PayloadManifest.cpp",
+        "VmSpec.cpp",
+    ],
+
+    // libxrom_sha256 is itself dependency-free and host_supported, so adding it
+    // here does not break the "no Android toolchain" property the comment above
+    // is protecting.
+    static_libs: ["libxrom_sha256"],
+    export_static_lib_headers: ["libxrom_sha256"],
+}
+
+// ---------------------------------------------------------------------------
+// The daemon
+// ---------------------------------------------------------------------------
+cc_binary {
+    name: "xrom_avfd",
+    defaults: [
+        "xrom_avfd_defaults",
+
+        // Supplies -DXROM_AVF_ABI=13|14 from XROM_AVF_SOURCE_ABI in
+        // device/x1/BoardConfig.mk, via the soong_config_module_type in
+        // vendor/xrom/Android.bp.
+        "xrom_avfd_abi_defaults",
+    ],
+    srcs: [
+        "AvfController.cpp",
+        "DaemonConfig.cpp",
+        "IsolationService.cpp",
+        "MicrodroidVmBuilder.cpp",
+        "PayloadVerifier.cpp",
+        "VmLifecycleObserver.cpp",
+        "main.cpp",
+    ],
+    static_libs: [
+        "libxrom_avf_core",
+
+        // The framed transport. Pure POSIX and host_supported, so the same code is
+        // exercised by tests/VsockChannel_test.cpp over a socketpair.
+        "libxrom_vsock_channel",
+    ],
+    shared_libs: [
+        "libbase",
+        "libbinder",
+
+        // Signature verification only: Ed25519 and RSA-4096/SHA-256 over the
+        // payload manifest, plus base64 and DER SubjectPublicKeyInfo parsing for
+        // the trust anchors. X-ROM never implements a signature scheme itself.
+        "libcrypto",
+        "libcutils",
+        "libjsoncpp",
+        "liblog",
+        "libutils",
+
+        // Unversioned on purpose: Soong resolves <interface>-cpp to the newest
+        // frozen version in the local tree, so one X-ROM source tree builds
+        // against Android 13 through current without an edit. To pin the ABI for
+        // a frozen vendor interface, list the frozen version explicitly, e.g.
+        // "android.system.virtualizationservice-V4-cpp"; the available versions
+        // are the directories under
+        // packages/modules/Virtualization/aidl_api/android.system.virtualizationservice/.
+        "android.system.virtualizationservice-cpp",
+        "android.system.virtualizationcommon-cpp",
+        "xrom_isolation-cpp",
+    ],
+    system_ext_specific: true,
+
+    // init.xrom.avf.rc is a separate prebuilt_etc under device/x1 because it also
+    // creates the data directories; listing it here keeps `m xrom_avfd` from
+    // producing a binary with no way to be started.
+    required: [
+        "init.xrom.avf.rc",
+
+        // trust_anchors.json. The signed manifest and its detached signature are
+        // release artifacts (security/payload_trust/manifest/README.md) and cannot
+        // be listed here, because they do not exist until the payload has been
+        // built and signed. Until they are installed the daemon fails closed and
+        // reports why, which is the correct state for an unsigned build.
+        "xrom_payload_trust_anchors",
+        "xrom_avf_features.xml",
+        "xrom_avf_privapp_permissions.xml",
+        "XVaultPayload",
+    ],
+}

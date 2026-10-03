@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The X-ROM Project
+  SPDX-License-Identifier: Apache-2.0
+
+  Device (vendor) VINTF manifest for the X-ROM x1 reference board.
+
+  Intentionally empty in Session 1.
+
+  target-level is the Framework Compatibility Matrix version this vendor image
+  is built against: 8 for Android 14, 202404 for Android 15, 202504 for
+  Android 16. Raise it when the board is rebased, and run the VTS Treble suites
+  afterwards — a target-level that does not match the framework is what makes a
+  GSI refuse to boot on this vendor image.
+
+  Nothing AVF-related belongs here. android.system.virtualizationservice is a
+  platform service registered with servicemanager and labelled in
+  service_contexts; it is not a vendor HAL and it is not part of VINTF.
+  Likewise android.xrom.isolation.IXIsolationService is a platform-internal
+  service in system_ext, consumed only by other system_ext code on the same
+  side of the Treble boundary. VINTF governs the vendor/framework contract, so
+  neither service is declared here.
+-->
+<manifest version="1.0" type="device" target-level="8">
+</manifest>

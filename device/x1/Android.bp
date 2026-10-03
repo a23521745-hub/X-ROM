@@ -1,0 +1,48 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// Board-level prebuilt artifacts for the X-ROM x1 reference device.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+// Declares android.software.virtualization_framework to PackageManager.
+// Without this, VirtualMachineManager.getSystemService() returns null and the
+// AVF VTS/CTS Microdroid tests report "device doesn't support avf".
+prebuilt_etc {
+    name: "xrom_avf_features.xml",
+    src: "permissions/xrom_avf_features.xml",
+    sub_dir: "permissions",
+    system_ext_specific: true,
+}
+
+// Restricted AVF permission allowlist for privileged host apps. See the file
+// header for which package it applies to and when it becomes live.
+prebuilt_etc {
+    name: "xrom_avf_privapp_permissions.xml",
+    src: "permissions/xrom_avf_privapp_permissions.xml",
+    sub_dir: "permissions",
+    system_ext_specific: true,
+}
+
+// init script: creates the AVF data directory with the label that
+// sepolicy/system_ext_private/file_contexts assigns to it, and starts xrom_avfd.
+prebuilt_etc {
+    name: "init.xrom.avf.rc",
+    src: "rootdir/init.xrom.avf.rc",
+    sub_dir: "init",
+    system_ext_specific: true,
+}
+
+// The required GKI kernel config delta, shipped on-device so that
+// tools/xrom_avf_verify.sh can diff the running kernel's /proc/config.gz
+// against what X-ROM asked for. This is the difference between "we enabled
+// pKVM in the build" and "pKVM is actually enabled on this unit".
+prebuilt_etc {
+    name: "xrom_gki_pkvm_fragment",
+    src: "kernel/gki_xrom_pkvm.fragment",
+    sub_dir: "xrom/kernel",
+    filename: "gki_xrom_pkvm.fragment",
+    system_ext_specific: true,
+}

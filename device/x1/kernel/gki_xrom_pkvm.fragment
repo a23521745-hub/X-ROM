@@ -1,0 +1,98 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# gki_xrom_pkvm.fragment — required GKI kernel config delta for X-ROM.
+#
+# This is a Kconfig *fragment*: it is merged over gki_defconfig, it is not a
+# standalone .config. Symbols that GKI already sets are listed anyway and
+# marked [gki-default] so that tools/xrom_preflight.py can detect upstream
+# drift (a hardening option silently turned off in a new GKI is a regression
+# we want a build failure for, not a surprise).
+#
+# Wiring: see kernel/README.md. There are two supported paths and they differ
+# in whether this file is compiled into the kernel or only checked against it.
+
+# ---------------------------------------------------------------------------
+# 1. AVF / pKVM host requirements
+# ---------------------------------------------------------------------------
+# KVM is the hypervisor. On arm64 GKI this is already built in; the protected
+# mode itself is *not* a Kconfig option — it is selected at boot by the kernel
+# command line parameter kvm-arm.mode=protected (see BoardConfig.mk section 2).
+# At EL2, pKVM installs a stage-2 identity map for the host and then confines
+# the host to EL1/EL0, which is what makes protected VM memory unreachable
+# from a fully compromised Android kernel.
+CONFIG_VIRTUALIZATION=y
+CONFIG_KVM=y
+
+# The host is the hypervisor's *untrusted* side. It must never itself be built
+# as a protected-KVM guest, or the stage-2 isolation that X-ROM depends on
+# collapses into the ordinary guest hypercall path.
+# CONFIG_ARM_PKVM_GUEST is not set
+
+# AVF verifies Microdroid payload APKs with fs-verity digests (the .idsig
+# files virtualizationservice creates via createOrUpdateIdsigFile()).
+CONFIG_FS_VERITY=y                                            # [gki-default]
+
+# ---------------------------------------------------------------------------
+# 2. ARMv8 architectural mitigations
+# ---------------------------------------------------------------------------
+CONFIG_ARM64_PTR_AUTH=y                                       # [gki-default]
+CONFIG_ARM64_PTR_AUTH_KERNEL=y                                # [gki-default]
+CONFIG_ARM64_BTI=y
+CONFIG_ARM64_BTI_KERNEL=y
+CONFIG_ARM64_MTE=y
+CONFIG_ARM64_E0PD=y
+CONFIG_ARM64_SW_TTBR0_PAN=y
+CONFIG_ARM64_TLB_RANGE=y
+CONFIG_UNMAP_KERNEL_AT_EL0=y                                  # [gki-default]
+CONFIG_RODATA_FULL_DEFAULT_ENABLED=y
+CONFIG_ARM64_PSEUDO_NMI=y
+
+# ---------------------------------------------------------------------------
+# 3. Compiler-enforced control-flow and memory integrity
+# ---------------------------------------------------------------------------
+CONFIG_SHADOW_CALL_STACK=y                                    # [gki-default]
+CONFIG_CFI_CLANG=y                                            # [gki-default]
+# CONFIG_CFI_PERMISSIVE is not set
+CONFIG_LTO_CLANG_THIN=y                                       # [gki-default]
+CONFIG_STACKPROTECTOR_STRONG=y                                # [gki-default]
+CONFIG_FORTIFY_SOURCE=y                                       # [gki-default]
+CONFIG_HARDENED_USERCOPY=y                                    # [gki-default]
+
+# ---------------------------------------------------------------------------
+# 4. Allocator and page hardening
+# ---------------------------------------------------------------------------
+CONFIG_SLAB_FREELIST_RANDOM=y                                 # [gki-default]
+CONFIG_SLAB_FREELIST_HARDENED=y                               # [gki-default]
+CONFIG_SHUFFLE_PAGE_ALLOCATOR=y
+CONFIG_RANDOMIZE_BASE=y                                       # [gki-default]
+CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y                             # [gki-default]
+CONFIG_INIT_ON_FREE_DEFAULT_ON=y                              # [gki-default]
+CONFIG_KFENCE=y
+
+# ---------------------------------------------------------------------------
+# 5. Write-protect and fail-closed behaviour
+# ---------------------------------------------------------------------------
+CONFIG_STRICT_KERNEL_RWX=y                                    # [gki-default]
+CONFIG_STRICT_MODULE_RWX=y                                    # [gki-default]
+CONFIG_DEBUG_LIST=y                                           # [gki-default]
+CONFIG_DEBUG_SG=y
+CONFIG_SCHED_STACK_END_CHECK=y
+CONFIG_BUG_ON_DATA_CORRUPTION=y
+# A hardened OS must not limp on after an oops: the in-memory state is no
+# longer trustworthy, and pKVM's guarantees say nothing about a corrupted host.
+CONFIG_PANIC_ON_OOPS=y                                        # [gki-default]
+
+# ---------------------------------------------------------------------------
+# 6. Explicitly rejected
+# ---------------------------------------------------------------------------
+# CONFIG_DEVMEM is not set
+# CONFIG_DEVKMEM is not set
+# CONFIG_KPROBES is not set          # runtime kernel patching primitive
+# CONFIG_BPF_SYSCALL is not set      # superseded for X-ROM by the dedicated
+                                     # X-Defender eBPF NDR policy, which is
+                                     # loaded from a signed, measured BPF
+                                     # object in a later session. Re-enable
+                                     # there, with a loader allowlist.
+# CONFIG_USERFAULTFD is not set      # classic pKVM/KVM page-fault primitive

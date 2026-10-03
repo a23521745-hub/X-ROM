@@ -1,0 +1,16 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/property.te — X-ROM property types.
+#
+
+# ro.xrom.avf.*   build-time facts (avf.mk -> PRODUCT_SYSTEM_EXT_PROPERTIES)
+# xrom.avf.*      runtime state written by xrom_avfd
+# persist.xrom.avf.*  operator overrides that survive a reboot
+#
+# Declared as a plain property_type rather than through system_internal_prop():
+# the macro lives in system/sepolicy/private/property.te and its exact behaviour
+# has changed across releases, and X-ROM's policy has to compile unchanged from
+# Android 13 to current.
+type xrom_avf_prop, property_type;

@@ -1,0 +1,29 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/file_contexts
+#
+# Installed as /system_ext/etc/selinux/system_ext_file_contexts.
+#
+
+# The AVF orchestration daemon. This label is what init_daemon_domain() matches
+# on to transition init -> xrom_avfd; if it does not match, the daemon runs in
+# the init domain with init's permissions, which is the single worst way this
+# file can be wrong.
+/system_ext/bin/xrom_avfd                 u:object_r:xrom_avfd_exec:s0
+
+# Daemon configuration.
+/system_ext/etc/xrom/avf\.json            u:object_r:xrom_avfd_config_file:s0
+
+# Microdroid payload APK, installed by the android_app module XVaultPayload.
+# The path must match kPayloadApkRoot in services/avf/xrom_avfd/VmSpec.h;
+# tools/xrom_preflight.py checks that the two agree.
+/system_ext/app/XVaultPayload(/.*)?       u:object_r:xrom_vault_payload_file:s0
+
+# Payload trust material. The path must match kPayloadTrustRoot in
+# services/avf/xrom_avfd/VmSpec.h; tools/xrom_preflight.py checks that they agree.
+/system_ext/etc/xrom/trust(/.*)?          u:object_r:xrom_payload_trust_file:s0
+
+# Per-VM state.
+/data/misc/xrom(/.*)?                     u:object_r:xrom_avfd_data_file:s0

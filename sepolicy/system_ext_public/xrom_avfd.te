@@ -1,0 +1,41 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_public/xrom_avfd.te — the exported half of the X-ROM AVF policy.
+#
+# Everything declared here is part of X-ROM's platform policy API: it is
+# versioned, visible to product/vendor policy, and must stay compatible with
+# already-shipped vendor images. Keep it to type declarations only. All allow
+# rules belong in system_ext_private, where they can change freely.
+#
+
+# The AVF orchestration daemon. coredomain is applied in the private half so
+# that the API surface does not hard-code which partition it ships from.
+type xrom_avfd, domain;
+
+# /system_ext/bin/xrom_avfd. system_file_type + exec_type is what lets
+# init_daemon_domain() perform the transition on exec.
+type xrom_avfd_exec, exec_type, file_type, system_file_type;
+
+#####################################
+# xrom_avfd_client(domain)
+# Allow $1 to submit isolated tasks to xrom_avfd and receive callbacks.
+#
+# Deliberately narrower than it looks: this grants binder reachability and
+# nothing else. It does NOT grant the ability to start a VM — that decision is
+# made inside the daemon by IsolationPolicy, which checks the caller's uid
+# against an allowlist, and by virtualizationservice, which re-checks the
+# AVF permissions independently. Two uncorrelated checks on the same request.
+define(`xrom_avfd_client', `
+allow $1 xrom_avf_service:service_manager find;
+binder_call($1, xrom_avfd)
+binder_call(xrom_avfd, $1)
+# xrom_avfd passes VM logs and console output back over an inherited fd.
+allow xrom_avfd $1:fd use;
+allow xrom_avfd $1:fifo_file { getattr read write };
+# The client talks to its own VM over a vsock that virtualizationservice
+# created. Reachability is scoped to VMs the client owns, so creating a vsock
+# is intentionally not granted here.
+allow $1 virtualizationservice:vsock_socket { getattr getopt read write };
+')

@@ -1,0 +1,51 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// Dependency-free SHA-256, shared by the host daemon and the Microdroid payload.
+//
+// The guest cannot link BoringSSL: the Microdroid linker namespace exposes the
+// NDK library set to payload code and libcrypto is not part of it. Two
+// implementations of the same digest that can disagree are worse than one
+// dependency-free implementation pinned to published vectors, so both sides use
+// this one. Signatures, MACs and key derivation never go through it — those use
+// BoringSSL on the host and AVF's attested-key API in the guest.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_library_static {
+    name: "libxrom_sha256",
+    srcs: ["Sha256.cpp"],
+    export_include_dirs: ["."],
+
+    // No shared_libs, no static_libs, no header_libs. This library must stay
+    // linkable from an NDK-only payload and from a host test binary alike.
+    host_supported: true,
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    apex_available: ["//apex_available:any"],
+}
+
+// NDK variant, for the Microdroid payload. A module built with sdk_version cannot
+// depend on a platform variant, so the guest gets its own module name over the same
+// source — the libbase / libbase_ndk convention. One source file, two build
+// flavours, no chance of the two sides hashing differently.
+cc_library_static {
+    name: "libxrom_sha256_ndk",
+    srcs: ["Sha256.cpp"],
+    export_include_dirs: ["."],
+    sdk_version: "current",
+    stl: "libc++_static",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    apex_available: ["//apex_available:any"],
+}

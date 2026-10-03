@@ -32,3 +32,53 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# ---------------------------------------------------------------------------
+# X-ROM / AOSP
+# ---------------------------------------------------------------------------
+# Host bootstrap test output (tools/hostcheck/run_host_tests.sh)
+.hostcheck/
+
+# Byte-compiled Python. tools/tests/payload_signing_roundtrip.sh imports
+# tools/xrom_verify_manifest.py to reuse its DER classification, which makes CPython
+# drop a cache directory next to the source.
+__pycache__/
+*.pyc
+
+# AOSP build artifacts, in case a tree is checked out inside this repository
+# or object files are produced by a standalone compile.
+out/
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.img
+*.zip
+*.apex
+*.idsig
+compile_commands.json
+
+# Never commit signing material. BoardConfig.mk points at the AOSP test keys
+# for development; real keys belong in the signing HSM, not in git.
+*.pem
+*.pk8
+*.p12
+*.key
+!external/avb/test/data/*.pem
+
+# ...but the X-ROM payload trust anchors ARE meant to be public. They are the
+# public halves of the keys whose signatures xrom_avfd accepts; publishing them is
+# what lets anyone check a manifest with tools/xrom_verify_manifest.py. The *.pem
+# rule above would silently swallow them, and a trust_anchors.json committed
+# without the keys it names is a build that fails closed with no explanation.
+# The private halves are still caught by *.pem: only *.pub.pem is re-included,
+# and tools/tests/payload_signing_roundtrip.sh fails if any other .pem appears
+# under security/.
+!security/payload_trust/keys/*.pub.pem
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*~

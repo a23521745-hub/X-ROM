@@ -1,0 +1,59 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// Host/guest shared wire protocol for X-ROM isolation tasks. Header only.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+// The codec is compiled, not header-only, so that both sides link the same
+// encode/decode and cannot drift. host_supported so that the framing tests run
+// on a build machine with no device attached.
+cc_library_static {
+    name: "libxrom_vsock_protocol",
+    srcs: ["VsockProtocol.cpp"],
+    export_include_dirs: ["."],
+    static_libs: ["libxrom_sha256"],
+    export_static_lib_headers: ["libxrom_sha256"],
+    host_supported: true,
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    apex_available: ["//apex_available:any"],
+}
+
+// Kept as a headers-only module for consumers that only need the wire structs
+// and constants (for example a future guest written in Rust via bindgen).
+cc_library_headers {
+    name: "xrom_vsock_protocol_headers",
+    export_include_dirs: ["."],
+    export_static_lib_headers: ["libxrom_sha256"],
+
+    // The payload runs inside Microdroid against the NDK; the daemon runs on the
+    // platform. The header is plain C++17 with no includes beyond <cstddef> and
+    // <cstdint>, so it needs no sdk_version at all and both sides can consume it.
+    // No apex_available restriction: nothing here is linked, so there is no ABI
+    // to confine, and restricting it would only block a future APEX consumer.
+}
+
+// NDK variant of the codec, for the Microdroid payload. See libxrom_sha256_ndk.
+cc_library_static {
+    name: "libxrom_vsock_protocol_ndk",
+    srcs: ["VsockProtocol.cpp"],
+    export_include_dirs: ["."],
+    sdk_version: "current",
+    stl: "libc++_static",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    static_libs: ["libxrom_sha256_ndk"],
+    export_static_lib_headers: ["libxrom_sha256_ndk"],
+    apex_available: ["//apex_available:any"],
+}

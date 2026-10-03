@@ -1,0 +1,37 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/file.te — X-ROM file types.
+#
+# core_data_file_type marks these as platform-owned data, which is what keeps
+# them on the correct side of the Treble policy boundary: a vendor image must
+# not be able to name them.
+#
+
+# /data/misc/xrom and /data/misc/xrom/avf
+# Per-VM state owned by xrom_avfd: allocated instance ids, .idsig digests,
+# instance.img, VM console and OS logs.
+type xrom_avfd_data_file, file_type, data_file_type, core_data_file_type;
+
+# /system_ext/app/XVaultPayload
+# The Microdroid payload APK, with assets/vm_config.json and
+# jni/arm64-v8a/libxvault_payload.so inside it. Lives on
+# a read-only, fs-verity-covered, AVB-verified partition because its digest is
+# measured into the protected VM's identity by pvmfw.
+type xrom_vault_payload_file, file_type, system_file_type;
+
+# /system_ext/etc/xrom/avf.json
+# Daemon configuration: task-class allowlist, resource ceilings, concurrency
+# limits. A separate type from the payload so that a config-parsing bug can be
+# denied payload access without either grant having to change.
+type xrom_avfd_config_file, file_type, system_file_type;
+
+# /system_ext/etc/xrom/trust
+# Payload trust material: trust_anchors.json (the pinned public keys), the
+# signed xrom_payload_manifest.json and its detached .sig. A separate type from
+# xrom_avfd_config_file because the two have different failure modes — a corrupt
+# avf.json makes the daemon fall back to its compiled-in fail-safe defaults,
+# while a corrupt trust file must make it refuse to launch anything at all — and
+# because nothing else in the system has any reason to read a signing anchor.
+type xrom_payload_trust_file, file_type, system_file_type;

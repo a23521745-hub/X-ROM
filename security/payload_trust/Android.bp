@@ -1,0 +1,36 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// Payload trust material, installed to /system_ext/etc/xrom/trust/.
+//
+// WHAT IS COMMITTED AND WHAT IS NOT
+// ---------------------------------
+// trust_anchors.json and the *.pub.pem files are public: they are the keys X-ROM
+// accepts, and publishing them is what lets anyone check a manifest with
+// tools/xrom_verify_manifest.py. The private halves are never in this tree. The
+// development keys that generated the committed anchors were created by
+// `tools/xrom_sign_payload.py generate-keys` in a temporary directory and
+// discarded; tools/tests/payload_signing_roundtrip.sh asserts that no private key
+// is present under security/.
+//
+// The manifest and its signature are release artifacts, not source. They pin the
+// SHA-256 of the built APK and payload library, which do not exist until the build
+// has run, so they cannot be checked in ahead of it. See manifest/README.md for
+// the two commands that produce them.
+//
+// Until they exist the daemon fails closed: PayloadVerifier cannot load a manifest,
+// Verify() returns false, and no VM is launched. That is the intended state of a
+// source checkout and the reason `required` on the xrom_avfd module lists only the
+// anchor file.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+prebuilt_etc {
+    name: "xrom_payload_trust_anchors",
+    src: "trust_anchors.json",
+    filename: "trust_anchors.json",
+    sub_dir: "xrom/trust",
+    system_ext_specific: true,
+}

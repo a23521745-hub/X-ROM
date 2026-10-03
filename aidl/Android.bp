@@ -1,0 +1,42 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// X-ROM isolation service AIDL.
+//
+// Platform-internal, CPP backend only. It is not a vendor HAL and it crosses no
+// Treble boundary, so it carries no stability annotation and no VINTF entry —
+// adding @VintfStability would oblige X-ROM to keep a vendor-facing ABI frozen
+// for an interface only system_ext code is allowed to call.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+aidl_interface {
+    name: "xrom_isolation",
+    srcs: ["android/xrom/isolation/*.aidl"],
+    owner: "xrom",
+
+    // No frozen versions yet: the interface is still being designed. Soong
+    // requires this on Android 14+; on an Android 13 baseline the property does
+    // not exist and must be removed, since an unknown Soong property is an
+    // error rather than a warning.
+    frozen: false,
+
+    backends: {
+        cpp: {
+            enabled: true,
+        },
+        // Disabled deliberately. Each enabled backend is ABI surface X-ROM has
+        // to keep working forever; the daemon and its only clients are C++.
+        java: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: false,
+        },
+        rust: {
+            enabled: false,
+        },
+    },
+}

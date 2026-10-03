@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The X-ROM Project
+  SPDX-License-Identifier: Apache-2.0
+
+  Device compatibility matrix: what the vendor image requires of the framework.
+
+  Empty because the X-ROM x1 reference board has no vendor HALs that call into
+  framework interfaces. This is a consequence of the Treble posture X-ROM takes
+  rather than an omission: AVF, the isolation daemon and the Microdroid payload
+  all live on the platform side (system / system_ext), so a generic system image
+  can be flashed over this vendor image and everything X-ROM adds keeps working.
+
+  When a vendor component does need a framework interface, add it here with the
+  exact version range and optional="false". PRODUCT_ENFORCE_VINTF_MANIFEST
+  (BoardConfig.mk section 7) turns an undeclared dependency into a build error.
+-->
+<compatibility-matrix version="1.0" type="device">
+</compatibility-matrix>

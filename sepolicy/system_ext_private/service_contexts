@@ -1,0 +1,10 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/service_contexts
+#
+# Stable AIDL services are registered under the fully qualified
+# <interface>/<instance> form, and that is the string servicemanager matches on.
+#
+android.xrom.isolation.IXIsolationService/xrom_isolation   u:object_r:xrom_avf_service:s0
