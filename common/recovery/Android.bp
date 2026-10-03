@@ -1,0 +1,49 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// The self-healing recovery core: the BCB layout and its append semantics, the
+// hybrid recovery decision engine, the quarantine ordering, the vault record and
+// its post-boot comparison, and the boot-loop policy.
+//
+// WHY THIS IS ONE LIBRARY WITH NO DEPENDENCIES
+// --------------------------------------------
+// Every consumer of this code runs somewhere unusual: xrom_sentineld runs in
+// system_ext on a device that has just detected a threat, xrom_recovery_gate runs
+// in the recovery image where there is no /data and very little userspace, and
+// xrom_ota_installer runs with write access to a partition nothing else can touch.
+// None of those environments can be reproduced on a build host, and none of them
+// can be debugged interactively once something has gone wrong.
+//
+// So every decision is a pure function of a struct: no clock, no binder, no file
+// I/O, no globals. The daemon reads /misc and passes the bytes in; this library
+// decides what to write back. That is the only reason a code path that fires once,
+// during an incident, on a device that is already broken, can be tested at all.
+//
+// recovery_available because xrom_recovery_gate links this from the recovery
+// image; host_supported because tools/hostcheck/run_host_tests.sh builds the same
+// sources with a system compiler on a machine that has no AOSP tree.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_library_static {
+    name: "libxrom_recovery_core",
+    srcs: [
+        "BcbMessage.cpp",
+        "BootAttemptPolicy.cpp",
+        "QuarantinePlan.cpp",
+        "RecoveryDecision.cpp",
+        "VaultMetadata.cpp",
+    ],
+    export_include_dirs: ["."],
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    host_supported: true,
+    recovery_available: true,
+    apex_available: ["//apex_available:any"],
+}

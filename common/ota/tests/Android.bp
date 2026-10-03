@@ -1,0 +1,26 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+
+// Separate module from xrom_recovery_core_test because Soong will not accept srcs
+// outside the module's own directory, and these tests live under common/ota. Both
+// suites are compiled together by tools/hostcheck/run_host_tests.sh.
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_test {
+    name: "xrom_ota_core_test",
+    host_supported: true,
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    local_include_dirs: [".."],
+    srcs: [
+        "OtaManifest_test.cpp",
+        "OtaVerifier_test.cpp",
+    ],
+    static_libs: ["libxrom_ota_core"],
+}

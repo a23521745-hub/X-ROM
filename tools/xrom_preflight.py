@@ -209,7 +209,8 @@ def check_license_headers() -> None:
 # ---------------------------------------------------------------------------
 # Syntax-level sanity: balanced delimiters and block keywords
 # ---------------------------------------------------------------------------
-def strip_noise(text: str, line_comment: str, block_comment: bool) -> str:
+def strip_noise(text: str, line_comment: str, block_comment: bool,
+                char_literals: bool = False) -> str:
     """Single-pass removal of comments and string literals.
 
     A regex per construct is not enough: `"//"` inside a string must not be read
@@ -217,6 +218,9 @@ def strip_noise(text: str, line_comment: str, block_comment: bool) -> str:
     in one left-to-right scan is the only order that gets both right, and getting
     it wrong makes the delimiter balance check report phantom failures on paths
     like /data/misc/xrom/avf//x.
+
+    |char_literals| additionally removes C++ character literals, and is opt-in
+    because `'` means something else in the other languages this is used on.
     """
     out: list[str] = []
     i, n = 0, len(text)
@@ -240,6 +244,37 @@ def strip_noise(text: str, line_comment: str, block_comment: bool) -> str:
             i += 1
             out.append('""')
             continue
+        if char_literals and ch == "'":
+            # A C++ character literal. Without this branch, `case '"':` reads as
+            # the start of a string literal: the scanner swallows everything up to
+            # the next double quote and unbalances the very braces the caller is
+            # counting. That is not a hypothetical — it is what the JSON escaper in
+            # common/ota/OtaManifest.cpp does, and the balance check reported the
+            # file as unbalanced until this branch existed.
+            #
+            # Opt-in rather than always on, because SELinux policy is m4-flavoured
+            # and uses `'` as a closing quote: define(`xrom_avfd_client', ...).
+            # Stripping `'...'` there would eat the macro names that
+            # check_sepolicy_types looks for.
+            if out and out[-1].isdigit() and nxt.isdigit():
+                out.append(ch)  # C++14 digit separator: 1'000'000
+                i += 1
+                continue
+            j = i + 1
+            while j < n and text[j] != "'":
+                j += 2 if text[j] == "\\" else 1
+            j += 1
+            # A real character literal is a handful of characters at most. An
+            # unterminated or implausible span means this `'` was not a literal,
+            # and failing open — emitting it and moving on — is better than
+            # swallowing the rest of the file.
+            if 2 <= j - i <= 12:
+                out.append("''")
+                i = j
+                continue
+            out.append(ch)
+            i += 1
+            continue
         out.append(ch)
         i += 1
     return "".join(out)
@@ -256,7 +291,7 @@ def check_balanced() -> None:
             # source text is then legitimately unbalanced.
             kept = "\n".join(line for line in text.splitlines()
                              if not line.lstrip().startswith("#"))
-            cleaned = strip_noise(kept, "//", True)
+            cleaned = strip_noise(kept, "//", True, char_literals=True)
             pairs = {"{": "}", "(": ")", "[": "]"}
             stack: list[str] = []
             for ch in cleaned:

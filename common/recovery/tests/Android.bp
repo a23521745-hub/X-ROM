@@ -1,0 +1,33 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+
+// Runs on both device and host: `atest xrom_recovery_core_test` for the device
+// variant, and the host variant is what CI runs because it needs no device. The
+// same five .cpp files are compiled by tools/hostcheck/run_host_tests.sh with a
+// system g++, so a test cannot pass in one runner and silently not exist in the
+// other.
+//
+// cc_test pulls in gtest and gtest_main automatically, so they are not listed.
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_test {
+    name: "xrom_recovery_core_test",
+    host_supported: true,
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    local_include_dirs: [".."],
+    srcs: [
+        "BcbMessage_test.cpp",
+        "BootAttemptPolicy_test.cpp",
+        "QuarantinePlan_test.cpp",
+        "RecoveryDecision_test.cpp",
+        "VaultMetadata_test.cpp",
+    ],
+    static_libs: ["libxrom_recovery_core"],
+}
