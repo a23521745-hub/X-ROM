@@ -8,3 +8,4 @@
 # <interface>/<instance> form, and that is the string servicemanager matches on.
 #
 android.xrom.isolation.IXIsolationService/xrom_isolation   u:object_r:xrom_avf_service:s0
+android.xrom.recovery.IXRecoveryService/xrom_recovery   u:object_r:xrom_recovery_service:s0

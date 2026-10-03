@@ -11,3 +11,5 @@
 ro.xrom.avf.                              u:object_r:xrom_avf_prop:s0
 xrom.avf.                                 u:object_r:xrom_avf_prop:s0
 persist.xrom.avf.                         u:object_r:xrom_avf_prop:s0
+xrom.recovery.                            u:object_r:xrom_recovery_prop:s0
+sys.xrom.recovery.                        u:object_r:xrom_recovery_prop:s0

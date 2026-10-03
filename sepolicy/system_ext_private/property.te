@@ -14,3 +14,13 @@
 # has changed across releases, and X-ROM's policy has to compile unchanged from
 # Android 13 to current.
 type xrom_avf_prop, property_type;
+
+# sys.xrom.recovery.*   runtime state written by xrom_sentineld: the quarantine
+#                       marker that the recovery image and the next boot read.
+# xrom.recovery.*       non-persistent state.
+#
+# A plain property_type rather than system_internal_prop(), for the same reason as
+# xrom_avf_prop: the macro lives in system/sepolicy/private/property.te and its exact
+# behaviour has changed across releases, and this policy has to compile unchanged from
+# Android 13 to current.
+type xrom_recovery_prop, property_type;

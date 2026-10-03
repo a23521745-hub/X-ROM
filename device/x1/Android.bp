@@ -35,6 +35,13 @@ prebuilt_etc {
     system_ext_specific: true,
 }
 
+prebuilt_etc {
+    name: "init.xrom.sentinel.rc",
+    src: "rootdir/init.xrom.sentinel.rc",
+    sub_dir: "init",
+    system_ext_specific: true,
+}
+
 // The required GKI kernel config delta, shipped on-device so that
 // tools/xrom_avf_verify.sh can diff the running kernel's /proc/config.gz
 // against what X-ROM asked for. This is the difference between "we enabled

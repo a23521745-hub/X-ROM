@@ -35,3 +35,32 @@ type xrom_avfd_config_file, file_type, system_file_type;
 # while a corrupt trust file must make it refuse to launch anything at all — and
 # because nothing else in the system has any reason to read a signing anchor.
 type xrom_payload_trust_file, file_type, system_file_type;
+
+# /data/misc/xrom/sentinel and everything under it
+# Sentinel state: incident records, the staged evidence copy, the lockdown marker
+# and the quarantine notice.
+#
+# A SEPARATE TYPE FROM xrom_avfd_data_file, AND NOT FOR TIDINESS. The existing
+# file_contexts entry labels /data/misc/xrom(/.*)? as xrom_avfd_data_file, and the
+# existing private policy carries
+#
+#     neverallow { domain -xrom_avfd -init } xrom_avfd_data_file:file { open create write append };
+#
+# If the sentinel's directory inherited that label, the sentinel writing its own
+# incident log would violate a neverallow that this project is explicitly required not
+# to contradict — a policy build failure, and a correct one. A more specific
+# file_contexts entry wins over the shorter prefix, so the subtree gets its own type
+# and its own matching neverallow below.
+type xrom_sentinel_data_file, file_type, data_file_type, core_data_file_type;
+
+# /dev/block/by-name/xrom_vault
+# The recovery fallback image partition. Writable by exactly one domain in the whole
+# policy, xrom_ota_installer, with a neverallow enforcing it.
+type xrom_vault_device, dev_type, block_device;
+
+# /dev/block/by-name/xrom_vault_meta
+# 64 KiB holding the VaultRecord: state, digests, package identity, and the sentinel's
+# own boot-loop counter. Separate from the image partition because SELinux labels block
+# devices and cannot distinguish one offset from another — a record the sentinel must
+# write cannot live on a partition only the installer may write. See correction #5.
+type xrom_vault_meta_device, dev_type, block_device;

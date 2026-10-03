@@ -523,9 +523,28 @@ def check_sepolicy_contexts() -> None:
         path = os.path.join(private, contexts_file)
         if os.path.isfile(path):
             labelled |= set(re.findall(r"u:object_r:([a-z0-9_]+):s0", read(path)))
+
+    # A type declared with the `domain` attribute is a process domain: it is entered
+    # through a transition from an exec type, never used as a label in a contexts
+    # file. Derived from the policy rather than from a hardcoded list, because a list
+    # has to be remembered and updated every time a domain is added, and forgetting it
+    # produces a warning that looks like a real problem.
+    process_domains = set()
+    for path in te_files():
+        text = strip_noise(read(path), "#", False)
+        for type_name, attrs in re.findall(
+                r"^\s*type\s+(xrom_[a-z0-9_]+)\s*,([^;]*);", text, re.M):
+            if re.search(r"\bdomain\b", attrs):
+                process_domains.add(type_name)
+
     for type_name in sorted(declared):
-        if type_name.endswith("_exec") or type_name in {"xrom_avfd", "xrom_isolated_payload"}:
-            continue  # domains and attributes are never labels in a contexts file
+        if type_name.endswith("_exec"):
+            continue  # an exec type is what a transition matches on, not a label
+        if type_name in process_domains:
+            continue
+        if type_name in {"xrom_avfd", "xrom_isolated_payload"}:
+            # Kept for the domains declared outside this tree's .te files.
+            continue
         if type_name not in labelled:
             warn(name, f"type '{type_name}' is declared but no contexts file uses it as a label")
 

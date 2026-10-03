@@ -1,0 +1,82 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// xrom_sentineld — X-ROM's self-healing recovery daemon.
+//
+// Same two-layer split as xrom_avfd, for the same reason:
+//
+//   libxrom_recovery_core   every decision — the BCB layout and its append
+//                           semantics, the quarantine ordering, the hybrid recovery
+//                           decision engine, the vault comparison, the boot-loop
+//                           policy. Plain C++17, no Android headers, host_supported,
+//                           recovery_available, and therefore testable on a build
+//                           machine and linkable from the recovery image.
+//   xrom_sentineld          everything that touches the platform: libbootloader_message,
+//                           netd's AIDL, block devices, properties, binder.
+//
+// The split is not cosmetic. The daemon's job runs once, during an incident, on a
+// device that is already in a bad state, and cannot be debugged interactively. Every
+// branch of every decision therefore has to be exercised somewhere it can be, which
+// is the pure core and its host tests.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_defaults {
+    name: "xrom_sentineld_defaults",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wimplicit-fallthrough",
+    ],
+    local_include_dirs: ["."],
+}
+
+cc_binary {
+    name: "xrom_sentineld",
+    defaults: ["xrom_sentineld_defaults"],
+    srcs: [
+        "PlatformActions.cpp",
+        "SentinelConfig.cpp",
+        "SentinelService.cpp",
+        "main.cpp",
+    ],
+    static_libs: [
+        "libxrom_recovery_core",
+
+        // Only for the opt-in deep digest and for digesting the staged evidence.
+        // X-ROM never implements a hash or a signature scheme itself.
+        "libxrom_sha256",
+    ],
+    shared_libs: [
+        "libbase",
+        "libbinder",
+        "libcutils",
+        "libjsoncpp",
+        "liblog",
+        "libutils",
+
+        // Reading and writing the bootloader control block. Used instead of a raw
+        // block write because the recovery field is a shared channel: uncrypt,
+        // RecoverySystem, update_engine and the A/B slot logic all queue commands in
+        // it, and a raw write silently discards them. See correction #1 in docs/05.
+        "libbootloader_message",
+
+        // The firewall chain layer of the network cut. Every netd type and constant
+        // this daemon names lives in NetdCompat.h, so a netd change moves one file.
+        "netd_aidl-cpp",
+
+        "xrom_recovery-cpp",
+    ],
+    system_ext_specific: true,
+
+    // init.xrom.sentinel.rc is a separate prebuilt_etc under device/x1 because it also
+    // creates the data directories; listing it here keeps `m xrom_sentineld` from
+    // producing a binary with no way to be started.
+    required: [
+        "init.xrom.sentinel.rc",
+    ],
+}

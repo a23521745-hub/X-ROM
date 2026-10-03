@@ -1,0 +1,191 @@
+{
+    "//": [
+        "xrom_sentineld runtime configuration.",
+        "Installed to /system_ext/etc/xrom/sentinel.json by PRODUCT_COPY_FILES.",
+        "",
+        "WHAT MAY AND MAY NOT BE CONFIGURED HERE",
+        "Ceilings, thresholds, paths and the list of uids allowed to report a threat.",
+        "NOTHING that decides what is trusted: no key material, no trust anchors, no",
+        "pinned digests. A configuration file on a writable partition that could relax a",
+        "signature check would be a signature check that one file write disables, so the",
+        "keys stay compiled into the image.",
+        "",
+        "A missing file is not an error and the daemon runs the shipped defaults, which",
+        "are the values below. A file that exists and does not parse stops the daemon:",
+        "guessing what a broken configuration meant is how a security policy ends up",
+        "looser than intended. Unknown keys are rejected for the same reason.",
+        "",
+        "The defaults here are deliberately the conservative ones. Every value that is",
+        "relaxed relative to common practice has a comment saying what the relaxation",
+        "costs."
+    ],
+
+    "//reporter_uids": [
+        "1000 is system, which covers xrom_avfd's client path and any system component",
+        "that detects something. Shell (2000) and root (0) are NOT in this list and are",
+        "gated separately by allow_shell_reporter / allow_root_reporter, both of which",
+        "additionally require a debuggable build. An adb-reachable threat reporter on a",
+        "production build is a remote reboot button."
+    ],
+    "reporter_uids": [1000],
+    "allow_root_reporter": false,
+    "allow_shell_reporter": false,
+
+    "quarantine": {
+        "//cancel_window_seconds": "The window in which a cancellation is honoured. 0 disables it entirely.",
+        "cancel_window_seconds": 30,
+
+        "//cancel_requires_authentication": [
+            "Cancelling requires a keyguard-authenticated user AND a one-time token the",
+            "sentinel issued with the prompt. Both halves are needed: the uid check alone",
+            "would let any system component cancel any quarantine, and the token alone",
+            "would let a non-UI process that read the log pretend to be a user."
+        ],
+        "cancel_requires_authentication": true,
+
+        "//allow_cancel_at_critical": [
+            "FALSE, AND THIS IS THE ONE PLACE THIS FILE DISAGREES WITH THE OBVIOUS",
+            "READING OF THE REQUIREMENT. The UI is part of the system under suspicion.",
+            "A dialog offering a way to dismiss a security response is a control surface",
+            "handed to whatever compromised the device, and at CRITICAL that is exactly",
+            "the component least worth trusting. See correction #7 in docs/05."
+        ],
+        "allow_cancel_at_critical": false,
+
+        "//reboot_threshold": "0 low, 1 medium, 2 high, 3 critical. HIGH and above reboot.",
+        "reboot_threshold": 2,
+
+        "total_budget_ms": 30000,
+        "staging_log_path": "/data/misc/xrom/sentinel/incident.log.enc"
+    },
+
+    "boot_attempts": {
+        "//": [
+            "Two counters for two failure classes, and X-ROM owns only one of them.",
+            "tries_remaining is the bootloader's and counts boots that never reached",
+            "userspace; it is read and never written, because it lives in a misc region",
+            "the bootloader, recovery and uncrypt share at offsets that are agreed across",
+            "AOSP and not configurable. integrity_failures is X-ROM's and counts boots",
+            "that reached userspace and then failed the post-boot comparison, which the",
+            "platform counter structurally cannot see. See correction #4 in docs/05."
+        ],
+        "max_integrity_failures": 3,
+
+        "//tries_remaining_floor": [
+            "1, NOT 0. At zero the bootloader has already marked the slot unbootable and",
+            "is falling back, so waiting for zero means X-ROM never gets to say anything",
+            "about a slot that is dying — which is the only window in which the vault is",
+            "useful. The loader rejects 0 for this reason."
+        ],
+        "tries_remaining_floor": 1,
+        "verity_corruption_counts": true,
+        "respect_recovery_tries": true,
+        "require_bootable_other_slot": true
+    },
+
+    "recovery": {
+        "//pinned_cidrs": [
+            "WEAK BY CONSTRUCTION, and kept only because it can push a decision toward",
+            "the vault and never toward the network. A CIDR check verifies the shape of a",
+            "DNS answer, not the identity of the host: whoever controls the resolver can",
+            "return any address inside it. It is also brittle, because these ranges belong",
+            "to whoever operates the update host and change without notice. The check that",
+            "carries the weight is the TLS public-key pin, compiled into the recovery",
+            "image. See correction #6 in docs/05.",
+            "Leaving this empty is a doubt, not a pass: a build that forgot the pins must",
+            "fail toward the vault rather than toward the network."
+        ],
+        "pinned_cidrs": [],
+
+        "//max_package_bytes": [
+            "500 MiB. Checked against the manifest's declared size BEFORE a byte is",
+            "fetched, because fetching is the expensive step and a multi-gigabyte package",
+            "on a metered link is a cost paid before discovering it cannot be installed.",
+            "0 disables network installs entirely rather than allowing anything."
+        ],
+        "max_package_bytes": 524288000,
+        "require_dual_signature": true,
+        "vault_unavailable": false,
+
+        "//skip_dns_range_check": [
+            "Off. Turning it on is a deliberate, logged weakening: it stops the DNS range",
+            "signal from blocking the remote path. It does NOT affect the TLS pin."
+        ],
+        "skip_dns_range_check": false
+    },
+
+    "monitored_dir": "/data/misc/xrom/inbox/",
+    "state_dir": "/data/misc/xrom/sentinel/",
+
+    "//vault_block_device": [
+        "Read-only to this daemon by SELinux. xrom_ota_installer is the only domain that",
+        "ever holds blk_file write on it, and that separation is enforced by a neverallow",
+        "rather than by this daemon being careful. See correction #5 in docs/05."
+    ],
+    "vault_block_device": "/dev/block/by-name/xrom_vault",
+
+    "//vault_meta_block_device": [
+        "A separate 64 KiB partition, and the split is not tidiness. SELinux labels",
+        "block devices and cannot distinguish one offset from another, so a record the",
+        "sentinel must be able to write cannot live on a partition where only the OTA",
+        "installer may write. Sharing one device would force the neverallow to name the",
+        "sentinel as an exception and the property the requirement asks for would be",
+        "gone. See correction #5 in docs/05."
+    ],
+    "vault_meta_block_device": "/dev/block/by-name/xrom_vault_meta",
+    "vault_record_offset": 0,
+
+    "check_integrity_on_boot": true,
+
+    "//deep_integrity_on_boot": [
+        "FALSE, AND IT SHOULD STAY FALSE. Deep hashes every byte of both partitions:",
+        "gigabytes of flash I/O on the boot path, duplicating work dm-verity already does",
+        "on every read of the running slot. The cheap comparison uses the AVB hashtree",
+        "roots, which are 32 bytes each and already authenticated. See correction #9."
+    ],
+    "deep_integrity_on_boot": false,
+
+    "//use_netd_firewall_chain": [
+        "OPEN RISK, NOT A SOLVED MECHANISM. X-ROM builds with CONFIG_BPF_SYSCALL off and",
+        "netd on Android 12+ uses eBPF for parts of its own operation, so whether netd is",
+        "functional on this kernel is not known and cannot be determined without a device.",
+        "This is why all three layers below are attempted and each reports independently,",
+        "instead of the first success ending the attempt: a device where netd is broken and",
+        "the ioctl layer works must produce a log that says so, or the question never gets",
+        "answered. See correction #10 in docs/05 and section 13 of xrom_avf_verify.sh."
+    ],
+    "use_netd_firewall_chain": true,
+    "netd_oem_chain": 1,
+
+    "//use_interface_down": [
+        "The layer that works without netd: SIOCSIFFLAGS on an AF_INET socket, needing",
+        "CAP_NET_ADMIN and nothing else. Its effect is also observable without a packet",
+        "capture, which the firewall chain's is not."
+    ],
+    "use_interface_down": true,
+
+    "//use_quarantine_property": [
+        "Setting a property is NOT itself a network cut. It records the quarantine",
+        "durably enough for the recovery image and the next boot to see it, and it is the",
+        "signal the device tree's init trigger acts on. If that trigger is not",
+        "provisioned this layer is decorative, which is why it is one of three and never",
+        "the only one."
+    ],
+    "use_quarantine_property": true,
+
+    "//stash_evidence_in_pvm": [
+        "FALSE, AND THIS IS A CONFLICT IN THE REQUIREMENTS RATHER THAN AN OVERSIGHT.",
+        "Moving evidence into a pVM means submitting a task through IXIsolationService,",
+        "which means naming a TaskClass. There is no TaskClass for evidence stashing, and",
+        "TaskClass is part of the frozen isolation AIDL this project is constrained not to",
+        "change. Repurposing a class the payload already serves would mean the evidence",
+        "log is processed by code expecting something else entirely, which is worse than",
+        "not sending it. Evidence is staged to staging_log_path with mode 0600 and its",
+        "SHA-256 recorded, which survives the reboot. See correction #14 in docs/05."
+    ],
+    "stash_evidence_in_pvm": false,
+    "evidence_vm_timeout_ms": 8000,
+
+    "reboot_target": "recovery",
+    "min_battery_percent_for_reboot": 5
+}

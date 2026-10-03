@@ -1,0 +1,48 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_public/xrom_sentineld.te — the exported recovery-service API.
+#
+# WHY A SEPARATE DOMAIN AND A SEPARATE INTERFACE
+# ----------------------------------------------
+# The recovery authority is not added to xrom_avfd, and this is deliberate rather
+# than a matter of taste. xrom_avfd measures payloads and starts VMs; xrom_sentineld
+# writes the bootloader control block in /misc, locks a directory, drops the network
+# and reboots the device. Those are different orders of authority, and putting them
+# in one domain means a bug in the payload-verification path becomes a bug that can
+# reboot the phone.
+#
+# It is also what keeps the project's own constraint satisfiable: IXIsolationService
+# and the vsock data plane are frozen, so the recovery surface is a new interface in
+# a new domain rather than new methods on an interface that may not change.
+#
+# See corrections #1 and #3 in docs/05.
+#
+
+type xrom_sentineld, domain;
+# /system_ext/bin/xrom_sentineld. system_file_type + exec_type is what lets
+# init_daemon_domain() perform the transition on exec. Declared in the private half
+# alongside the other X-ROM exec types is not possible: the transition macro above is
+# public, and a macro may only reference types visible where it is expanded.
+type xrom_sentineld_exec, exec_type, file_type, system_file_type;
+
+#####################################
+# xrom_sentineld_client(domain)
+# Allow $1 to report a threat to xrom_sentineld and receive the outcome.
+#
+# NARROWER THAN IT LOOKS, AND THE NARROWNESS IS THE POINT. This grants binder
+# reachability and nothing else. It does NOT grant the ability to cause a reboot:
+# that decision is made inside the daemon by IsAuthorisedReporter(), which checks the
+# caller's uid against a list that itself cannot enable root or shell on a
+# non-debuggable build. Two uncorrelated checks on the same request, mirroring the
+# xrom_avfd_client() discipline already in this tree.
+#
+# Note what is NOT granted here compared to xrom_avfd_client(): no fd use, no
+# fifo_file access, no vsock. The sentinel returns parcelables and nothing else, so
+# a client that needs more than binder_call has been granted too much.
+define(`xrom_sentineld_client', `
+allow $1 xrom_recovery_service:service_manager find;
+binder_call($1, xrom_sentineld)
+binder_call(xrom_sentineld, $1)
+')

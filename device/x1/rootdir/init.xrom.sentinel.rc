@@ -1,0 +1,56 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# init.xrom.sentinel.rc — installed to /system_ext/etc/init/init.xrom.sentinel.rc
+#
+
+on post-fs-data
+    # Sentinel state: incident records, the staged evidence copy, the lockdown marker
+    # and the quarantine notice.
+    #
+    # 0700 system:system, same reasoning as /data/misc/xrom/avf. The incident log is
+    # the audit trail for a security response and the staged evidence is the thing the
+    # response exists to preserve; a directory either of them can be read from or
+    # written to by anything else makes both worthless. sepolicy enforces the same
+    # boundary by label, and both halves are needed: the mode bits survive a policy
+    # mistake and the label survives a chmod.
+    mkdir /data/misc/xrom/sentinel 0700 system system
+    mkdir /data/misc/xrom/sentinel/incidents 0700 system system
+    restorecon_recursive /data/misc/xrom/sentinel
+
+# ---------------------------------------------------------------------------
+# xrom_sentineld — self-healing recovery daemon
+# ---------------------------------------------------------------------------
+# class late_start rather than core: it needs /data mounted and it performs boot-time
+# integrity work, neither of which belongs in the pre-data boot phase. It still runs
+# early enough that a device which should not have come up at all does not spend its
+# first seconds serving binder calls.
+#
+# CAP_NET_ADMIN is granted for exactly one reason: the SIOCSIFFLAGS layer of the
+# network cut. It is the layer that works when netd does not, which on a kernel built
+# with CONFIG_BPF_SYSCALL off is an open question rather than an assumption. No other
+# capability is granted and sepolicy has a neverallow for the rest.
+#
+# No `seclabel`: the domain transition is derived from the binary's label in
+# file_contexts by init_daemon_domain(xrom_sentineld), which keeps working when the
+# binary moves. A hard-coded seclabel would not.
+#
+# No `critical`: a crash loop here must not reboot the phone during bring-up. The
+# responses are fail-closed at the daemon level instead — an unauthorised reporter is
+# refused, an unreadable vault is inconclusive rather than a mismatch, and a network
+# cut that no layer confirms is reported as not cut.
+#
+# `shutdown critical` IS set, and it is not a contradiction with the above. Rebooting
+# is not an exceptional condition for this daemon; it is the last step of a plan. Being
+# killed halfway through arming a BCB is how a device ends up with a partially written
+# misc, which is worse than not rebooting at all. main() also ignores SIGTERM for the
+# same reason, and both halves are needed: this entry keeps init from killing it early,
+# the handler covers anything else that signals it.
+service xrom_sentineld /system_ext/bin/xrom_sentineld
+    class late_start
+    user system
+    group system
+    capabilities NET_ADMIN
+    task_profiles ServiceCapacityLow
+    shutdown critical
