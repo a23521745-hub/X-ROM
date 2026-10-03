@@ -1,0 +1,93 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/xrom_ota_installer.te — the vault writer.
+#
+# This domain holds one permission that nothing else in the system holds, and is
+# denied almost everything else. The asymmetry is the design: the ability to write the
+# recovery fallback is the ability to decide what a device boots into after an
+# incident, so it is isolated rather than added to a domain that already does other
+# things.
+#
+
+init_daemon_domain(xrom_ota_installer)
+
+# ---------------------------------------------------------------------------
+# What it may do
+# ---------------------------------------------------------------------------
+# Write the vault image. This is the only grant of its kind in the policy.
+allow xrom_ota_installer xrom_vault_device:blk_file { read write open getattr ioctl seek };
+# Write the record that describes what it put there: state, digests, package identity.
+allow xrom_ota_installer xrom_vault_meta_device:blk_file { read write open getattr ioctl seek };
+allow xrom_ota_installer block_device:dir search;
+
+# Write the slot it is updating, through the same block-device path update_engine
+# uses. Not mounted: an inactive slot has no mounted filesystem to write to, and
+# mounting one rw to install into it would put a second writer in front of the same
+# bytes dm-verity is checking.
+allow xrom_ota_installer system_block_device:blk_file { read write open getattr ioctl seek };
+
+binder_use(xrom_ota_installer)
+
+# Reads its own pinned anchors, and nothing else under /system_ext/etc/xrom. The
+# anchors are the only trust input this binary has and they are on a read-only,
+# AVB-verified partition.
+allow xrom_ota_installer xrom_ota_trust_file:dir search;
+allow xrom_ota_installer xrom_ota_trust_file:file { read open getattr };
+
+# Reads the signed manifest and the package it was handed, both of which live on
+# /data or /cache. O_NOFOLLOW and a digest comparison happen in the code; the policy
+# side of that is that this domain cannot reach the payload trust anchors, so a
+# manifest it does not like cannot be replaced with one it does.
+allow xrom_ota_installer xrom_sentinel_data_file:dir search;
+allow xrom_ota_installer xrom_sentinel_data_file:file { read open getattr };
+
+# ---------------------------------------------------------------------------
+# Neverallows
+# ---------------------------------------------------------------------------
+
+# NO NETWORK. The installer writes; the recovery image downloads. Splitting those
+# means the domain that can write the recovery fallback cannot reach out and fetch
+# anything to put there, so compromising the writer does not also give an attacker a
+# delivery channel. This is the single most valuable restriction in this file and it
+# is why the OTA flow has two executables rather than one.
+neverallow xrom_ota_installer self:tcp_socket *;
+neverallow xrom_ota_installer self:udp_socket *;
+neverallow xrom_ota_installer self:rawip_socket *;
+neverallow xrom_ota_installer self:netlink_route_socket *;
+neverallow xrom_ota_installer self:netlink_socket *;
+
+# It does not write /misc. Arming a recovery boot is the sentinel's job, and an
+# installer that could also arm one could turn a failed write into a boot loop.
+neverallow xrom_ota_installer misc_block_device:blk_file { write append };
+
+# It may not write the sentinel's state, and it may not read the payload trust
+# material. Neither is needed to install an image and both would widen what a
+# compromise of the installer can cover up.
+neverallow xrom_ota_installer xrom_sentinel_data_file:file { write append create unlink setattr };
+neverallow xrom_ota_installer xrom_payload_trust_file:file { read open getattr };
+# And it may not write its own anchors. A trust anchor a binary can modify is not an
+# anchor; it is a suggestion the binary happens to agree with at the moment.
+neverallow xrom_ota_installer xrom_ota_trust_file:file { write append create unlink setattr };
+
+# No hypervisor, no VM sockets, no module loading, no MAC override. Same argument as
+# the sentinel's list: a domain with one job should not be able to undo the policy
+# that gives it that job.
+neverallow xrom_ota_installer kvm_device:chr_file *;
+neverallow xrom_ota_installer self:vsock_socket *;
+neverallow xrom_ota_installer self:capability { sys_module sys_rawio sys_ptrace sys_admin net_admin sys_boot dac_override dac_read_search };
+neverallow xrom_ota_installer self:capability2 { mac_admin mac_override syslog };
+
+# It may not reboot the device. A failed install must leave the device running the
+# image it was running, and an installer that can reboot can make that untrue.
+neverallow xrom_ota_installer powerctl_prop:property_service set;
+
+# ---------------------------------------------------------------------------
+# THE VAULT WRITE MONOPOLY
+# ---------------------------------------------------------------------------
+# The requirement asked for exactly this rule and it is kept verbatim in substance:
+# nothing outside xrom_ota_installer may write the vault image. Unlike the misc rule
+# it sits beside, this one the build can satisfy, because X-ROM defines the partition
+# and no AOSP domain has any reason to name it.
+neverallow { domain -xrom_ota_installer } xrom_vault_device:blk_file write;

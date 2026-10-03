@@ -1,0 +1,33 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+// Runs on both device and host: `atest xrom_avf_core_test` for the device
+// variant, `m xrom_avf_core_test` plus
+// `out/host/linux-x86/nativetest64/xrom_avf_core_test/xrom_avf_core_test` for
+// the host one. The host variant is what CI runs, because it needs no device.
+//
+// cc_test pulls in gtest and gtest_main automatically (gtest: true is the
+// default), so they are not listed here.
+cc_test {
+    name: "xrom_avf_core_test",
+
+    // Only the warning/standard defaults, not the core library's srcs: linking
+    // libxrom_avf_core below already provides those objects.
+    defaults: ["xrom_avfd_defaults"],
+    host_supported: true,
+
+    // The daemon's headers live one level up; local_include_dirs entries are
+    // relative to this Android.bp, so "." from the shared defaults is tests/.
+    local_include_dirs: [".."],
+
+    srcs: [
+        "IsolationPolicy_test.cpp",
+        "PayloadManifest_test.cpp",
+        "VmSpec_test.cpp",
+    ],
+    static_libs: ["libxrom_avf_core"],
+}

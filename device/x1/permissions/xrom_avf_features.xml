@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The X-ROM Project
+  SPDX-License-Identifier: Apache-2.0
+
+  Declares AVF to PackageManager.
+
+  FEATURE_VIRTUALIZATION_FRAMEWORK is the single authoritative signal that AVF
+  exists on this device:
+    * VirtualMachineManager.getSystemService() returns non-null only when it is
+      present (below API level 34 the service does not exist at all).
+    * PackageManager.hasSystemFeature(FEATURE_VIRTUALIZATION_FRAMEWORK) is the
+      version-independent probe recommended by AOSP for apps.
+    * The AVF VTS/CTS suites (MicrodroidTestApp, VirtualizationTestCases) skip
+      or fail based on it.
+
+  Protected-VM capability is deliberately NOT declared here. It is a boot-time
+  hardware/firmware fact, communicated by the bootloader through the bootconfig
+  key androidboot.hypervisor.protected_vm.supported=true and surfaced as
+  ro.boot.hypervisor.protected_vm.supported. Declaring pKVM support in a static
+  XML would let a build claim an isolation property the silicon cannot provide,
+  which is exactly the failure mode X-ROM exists to prevent.
+-->
+<config>
+    <feature name="android.software.virtualization_framework" />
+</config>

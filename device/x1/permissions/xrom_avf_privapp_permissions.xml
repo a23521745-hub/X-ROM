@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The X-ROM Project
+  SPDX-License-Identifier: Apache-2.0
+
+  Restricted AVF permission allowlist for privileged host apps.
+
+  ============================================================================
+  HOW AVF PERMISSIONS ACTUALLY RESOLVE — read before editing
+  ============================================================================
+  virtualizationservice does not trust SELinux alone; it asks
+  PermissionManagerService whether the calling UID holds the relevant
+  restricted permission. The three permissions that matter:
+
+    android.permission.MANAGE_VIRTUAL_MACHINE
+        signature|privileged. Create / start / stop / query any VM built from an
+        app config. Introduced at API level 34. On Android 14 it could be
+        granted only to privileged apps; from Android 15 it is available to all
+        preinstalled apps.
+
+    android.permission.USE_CUSTOM_VIRTUAL_MACHINE
+        signature|privileged. Required for VirtualMachineRawConfig, for a custom
+        guest kernel image, for device assignment, and for the `configPath`
+        form of the Microdroid payload config — which is the form X-ROM uses,
+        because a JSON config inside the payload APK is measured into the VM
+        identity while an ad-hoc parameter struct is not.
+
+    android.permission.MANAGE_VIRTUALIZATION_STATE
+        signature|privileged. Set the global virtualization state (for example,
+        suspend every VM under thermal or memory pressure).
+
+  xrom_avfd does NOT appear in this file. It runs as uid system (AID 1000), and
+  PermissionManagerService grants every permission to uid 0 and uid 1000, so an
+  allowlist entry for it would be dead text. Its isolation comes from
+  sepolicy/system_ext_private/xrom_avfd.te instead — a domain that cannot reach
+  /dev/kvm, cannot ptrace, and can only talk to virtualizationservice.
+
+  ============================================================================
+  STATUS: forward-looking
+  ============================================================================
+  Session 1 ships no privileged host app. This file is installed now so that
+  the grant path is already in place and enforced (ro.control_privapp_permissions
+  = enforce) when the X-Vault host app lands. Rename the package below to match
+  the real applicationId; an entry for a package that is not installed is
+  harmless, but a privileged app requesting these permissions with no matching
+  entry is a boot-time denial.
+-->
+<permissions>
+    <privapp-permissions package="com.xrom.xvault.host">
+        <permission name="android.permission.MANAGE_VIRTUAL_MACHINE" />
+        <permission name="android.permission.USE_CUSTOM_VIRTUAL_MACHINE" />
+        <permission name="android.permission.MANAGE_VIRTUALIZATION_STATE" />
+    </privapp-permissions>
+</permissions>

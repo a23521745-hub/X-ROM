@@ -1,0 +1,61 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// The framed vsock transport shared by the host daemon and the Microdroid payload.
+//
+// VsockChannel is pure POSIX — a file descriptor, poll(), send(), recv() and the
+// codec in common/protocol. It deliberately knows nothing about binder, libbase,
+// logging or the AVF AIDL, because the code that turns an untrusted byte stream
+// into validated frames is the part worth testing without a hypervisor. See
+// tests/VsockChannel_test.cpp, which drives it over a socketpair.
+//
+// Two module names over one set of sources, following the libbase / libbase_ndk
+// convention in AOSP: the daemon links the platform variant and the payload links
+// the NDK one, because a payload built with sdk_version cannot take a dependency
+// on a platform variant.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_defaults {
+    name: "xrom_vsock_channel_defaults",
+    srcs: ["VsockChannel.cpp"],
+    export_include_dirs: ["."],
+    static_libs: ["libxrom_vsock_protocol"],
+    export_static_lib_headers: ["libxrom_vsock_protocol"],
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    apex_available: ["//apex_available:any"],
+}
+
+// Platform / host variant. host_supported so the transport tests build and run on
+// a machine with no device attached.
+cc_library_static {
+    name: "libxrom_vsock_channel",
+    defaults: ["xrom_vsock_channel_defaults"],
+    host_supported: true,
+}
+
+// NDK variant for the Microdroid payload. Same sources, same protocol; the only
+// difference is the C++ runtime and sysroot it is built against.
+cc_library_static {
+    name: "libxrom_vsock_channel_ndk",
+    srcs: ["VsockChannel.cpp"],
+    export_include_dirs: ["."],
+    sdk_version: "current",
+    stl: "libc++_static",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    static_libs: ["libxrom_vsock_protocol_ndk"],
+    export_static_lib_headers: ["libxrom_vsock_protocol_ndk"],
+    apex_available: ["//apex_available:any"],
+}

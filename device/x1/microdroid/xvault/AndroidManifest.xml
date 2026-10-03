@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The X-ROM Project
+  SPDX-License-Identifier: Apache-2.0
+
+  Manifest for the Microdroid payload APK.
+
+  This is not an application. It is a container whose only purpose is to carry a
+  signed, fs-verity covered bundle of (native payload library + VM
+  configuration) to a protected VM. So the manifest declares:
+
+    * no launcher activity, so nothing on the device can start it as an app
+    * no exported components, so nothing can bind to it
+    * no uses-permission, so it holds nothing to revoke
+    * android:hasCode="false", because there is no dex; the code is in
+      jni/arm64-v8a/libxvault_payload.so
+
+  The package name still matters: it is part of what the APK signature and the
+  .idsig digest commit to, and therefore part of the VM identity pvmfw derives.
+  Changing it changes the VM's secret.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.xrom.xvault">
+
+    <application
+        android:label="X-Vault Microdroid Payload"
+        android:hasCode="false" />
+
+</manifest>

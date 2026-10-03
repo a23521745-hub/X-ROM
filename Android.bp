@@ -1,0 +1,47 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// Root Soong configuration for X-ROM.
+//
+// The only thing defined here is the bridge that lets a Makefile-level board
+// decision (XROM_AVF_SOURCE_ABI in device/x1/BoardConfig.mk) reach the C++
+// compiler as a -D flag. Product config sets it with:
+//
+//     $(call soong_config_set,xrom,avf_abi,ANDROID_14_PLUS)
+//
+// and services/avf/xrom_avfd/Android.bp consumes "xrom_avfd_abi_defaults".
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+soong_config_module_type {
+    name: "xrom_avf_cc_defaults",
+    module_type: "cc_defaults",
+    config_namespace: "xrom",
+    variables: ["avf_abi"],
+    properties: ["cflags"],
+}
+
+xrom_avf_cc_defaults {
+    name: "xrom_avfd_abi_defaults",
+    soong_config_variables: {
+        avf_abi: {
+            // Android 13 (T): IVirtualizationService::createVm() takes three
+            // arguments and VirtualMachineAppConfig is a flat parcelable with a
+            // direct configPath field.
+            ANDROID_13: {
+                cflags: ["-DXROM_AVF_ABI=13"],
+            },
+            // Android 14+ (U/V/trunk): createVm() takes four arguments
+            // (consoleOut, consoleIn, osLog) and VirtualMachineAppConfig gained
+            // name / instanceId / osName plus a nested Payload union.
+            ANDROID_14_PLUS: {
+                cflags: ["-DXROM_AVF_ABI=14"],
+            },
+            conditions_default: {
+                cflags: ["-DXROM_AVF_ABI=14"],
+            },
+        },
+    },
+}

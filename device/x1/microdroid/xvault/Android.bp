@@ -1,0 +1,85 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// X-Vault: the Microdroid payload that runs inside the protected VM.
+//
+// Packaging follows the AOSP Microdroid contract exactly:
+//   * the payload is a cc_library_shared exporting AVmPayload_main
+//   * it is embedded in an APK through jni_libs
+//   * the VM configuration is a JSON file under assets/, referenced from the
+//     host as VirtualMachineAppConfig.payload.configPath = "assets/vm_config.json"
+//   * use_embedded_native_libs keeps the .so uncompressed and page-aligned so
+//     Microdroid can map it straight out of the verified APK instead of
+//     extracting it to writable storage
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_library_shared {
+    name: "libxvault_payload",
+    srcs: ["payload/xvault_payload.cpp"],
+
+    // Microdroid payloads build against the NDK subset that AVF exposes to guest
+    // code, not against the platform.
+    sdk_version: "current",
+    stl: "libc++_static",
+    compile_multilib: "64",
+
+    header_libs: [
+        // Declares AVmPayload_main, the entry point microdroid_launcher resolves.
+        "vm_payload_headers",
+    ],
+
+    // The whole host/guest stack, in NDK flavour: the framed transport, the codec
+    // and the dependency-free SHA-256. Each exports its own include directory, so
+    // the payload needs no header_libs of its own. These are the same sources the
+    // daemon links, which is the point — a wire format implemented twice is a wire
+    // format that eventually disagrees with itself.
+    static_libs: ["libxrom_vsock_channel_ndk"],
+
+    // liblog is the only shared library: the payload must not pull in anything
+    // that widens what the guest linker namespace has to expose.
+    shared_libs: ["liblog"],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+
+    // Embedded in the APK below. There is no reason for this library to also
+    // exist on the host filesystem, and one less installed artifact is one less
+    // thing an attacker on the host can inspect.
+    installable: false,
+    apex_available: ["//apex_available:platform"],
+}
+
+android_app {
+    name: "XVaultPayload",
+    manifest: "AndroidManifest.xml",
+    asset_dirs: ["assets"],
+
+    jni_libs: ["libxvault_payload"],
+    use_embedded_native_libs: true,
+
+    sdk_version: "current",
+
+    // Signed with the platform key. The signature is what the .idsig digest tree
+    // commits to, and that digest is measured by pvmfw into the VM identity, so
+    // the key choice is part of the attestation chain and not a packaging detail.
+    certificate: "platform",
+
+    // Installs to /system_ext/app/XVaultPayload/XVaultPayload.apk, which is what
+    // kPayloadApkRoot in services/avf/xrom_avfd/VmSpec.h and
+    // sepolicy/system_ext_private/file_contexts both name.
+    system_ext_specific: true,
+
+    // There is no code to optimise and nothing to preopt.
+    optimize: {
+        enabled: false,
+    },
+    dex_preopt: {
+        enabled: false,
+    },
+}

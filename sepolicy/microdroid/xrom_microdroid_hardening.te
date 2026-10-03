@@ -1,0 +1,199 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# sepolicy/microdroid/xrom_microdroid_hardening.te
+#
+# GUEST-SIDE policy. This file does not apply to Android; it applies to
+# Microdroid, the minimal Android distribution that runs *inside* the protected
+# VM. Host-side policy for the daemon is sepolicy/system_ext_private/.
+#
+# ----------------------------------------------------------------------------
+# WHERE IT GOES
+# ----------------------------------------------------------------------------
+# Microdroid's policy is assembled from system/sepolicy/microdroid/, which is
+# not reachable through any BOARD_* / SYSTEM_EXT_* variable — it is part of the
+# Microdroid image build, not of the device's policy build. X-ROM builds AOSP
+# from source, so the file is installed by the X-ROM patch series at:
+#
+#     system/sepolicy/microdroid/system/private/xrom_microdroid_hardening.te
+#
+# If it is dropped anywhere else it is silently not compiled, and the VM will
+# run with stock Microdroid policy. tools/xrom_preflight.py checks that the
+# file has been placed.
+#
+# ----------------------------------------------------------------------------
+# WHY AN ATTRIBUTE AND NOT A NEW DOMAIN
+# ----------------------------------------------------------------------------
+# Microdroid chooses the payload's domain from the payload APK's seinfo, which
+# comes from mac_permissions inside the guest. Giving X-Vault a private domain
+# therefore means shipping a guest-side mac_permissions.xml and seapp_contexts
+# keyed on the X-ROM payload signing certificate. That is the right end state
+# and it is scheduled for the session that introduces payload signing; doing it
+# halfway now would mean a domain nothing transitions into.
+#
+# What is done instead: X-ROM asserts a property of *every* Microdroid payload
+# on an X-ROM device, because on X-ROM there is only one kind — our own. The
+# attribute makes that assertion machine-checked, and it gives the future
+# dedicated domain something to inherit.
+#
+
+attribute xrom_isolated_payload;
+
+# Every Microdroid payload on X-ROM is an isolated security task. Nothing on an
+# X-ROM device boots Microdroid for any other reason: there is no Terminal app,
+# no Linux development environment, no third party payload path.
+typeattribute microdroid_payload xrom_isolated_payload;
+
+# ===========================================================================
+# Assertions
+# ===========================================================================
+# A payload that can load a kernel module, touch physical memory, mount
+# filesystems or set the clock is not an isolated payload. It can rebuild the
+# guest kernel's view of the world and everything measured at boot stops
+# meaning anything.
+neverallow xrom_isolated_payload self:capability {
+    sys_module
+    sys_rawio
+    sys_admin
+    sys_boot
+    sys_time
+    sys_ptrace
+    net_admin
+    net_raw
+    dac_override
+    dac_read_search
+};
+neverallow xrom_isolated_payload self:capability2 { mac_admin mac_override syslog };
+
+# The payload must not be able to inspect or interfere with anything else in
+# the VM. microdroid_manager is the only legitimate signalling peer, and
+# crash_dump must stay able to collect a tombstone.
+neverallow xrom_isolated_payload { domain -microdroid_manager -crash_dump -microdroid_payload }:process {
+    ptrace
+    signal
+    sigkill
+    sigstop
+};
+
+# ===========================================================================
+# The vsock is the only way out
+# ===========================================================================
+# X-ROM's data plane is one framed vsock channel (common/protocol/VsockProtocol.h
+# and common/vsock/VsockChannel.h) between the daemon and the payload. Every
+# guarantee built on top of it — that the host verified this payload's manifest
+# before sending input, that the output digest describes bytes this VM produced,
+# that a result cannot be replayed — assumes there is no second channel. If the
+# payload could also open a TCP socket, the host's verification would be advice
+# rather than a gate: the same input could be exfiltrated and the same output
+# forged through a path the daemon never sees.
+#
+# So this is not one rule, it is the whole socket class list, asserted family by
+# family. Each block below states what it closes and why that family is on the
+# list at all.
+
+# --- block devices ---------------------------------------------------------
+# instance.img and the encrypted storage image are mounted by
+# microdroid_manager. A payload that can open them raw can bypass the guest's
+# own integrity checks, and can write to the encrypted image without the
+# filesystem's journal ever recording it.
+neverallow xrom_isolated_payload block_device:blk_file *;
+
+# --- link-layer and raw IP -------------------------------------------------
+# packet_socket and rawip_socket are below IP: they address the interface, not a
+# peer, so they are the families an implant would use to talk to anything on the
+# same link. AVF's network support never grants either, so these neverallow
+# rules hold whether or not RELEASE_AVF_ENABLE_NETWORK is set.
+neverallow xrom_isolated_payload self:packet_socket *;
+neverallow xrom_isolated_payload self:rawip_socket *;
+
+# --- IP sockets ------------------------------------------------------------
+# tcp_socket, udp_socket, sctp_socket and dccp_socket are what "external
+# communication" means for a normal program. None of them is reachable over
+# vsock, and nothing in an X-ROM task needs one: input arrives as kTaskInput
+# frames and output leaves as kTaskOutput frames on the single connected channel.
+#
+# READ THIS BEFORE SOFTENING IT. Unlike the two families above, AOSP's
+# Microdroid policy DOES allow these for microdroid_payload when the build sets
+# RELEASE_AVF_ENABLE_NETWORK. In that configuration these neverallow rules
+# contradict a live allow and the SELinux build fails. That failure is the
+# intended behaviour and not a bug in this file: X-ROM's isolation guarantee
+# requires vsock-only egress, so a build that turns payload networking on must
+# stop and be made to choose. The fix is
+#
+#     RELEASE_AVF_ENABLE_NETWORK := false
+#
+# in the product configuration, not the removal of these rules. Removing them
+# silently converts every downstream claim about the data plane into an
+# assumption nobody is checking.
+neverallow xrom_isolated_payload self:tcp_socket *;
+neverallow xrom_isolated_payload self:udp_socket *;
+neverallow xrom_isolated_payload self:sctp_socket *;
+neverallow xrom_isolated_payload self:dccp_socket *;
+# The generic socket class is the catch-all for families SELinux does not name,
+# so leaving it unasserted would leave a hole for exactly the families nobody
+# thought to list. vsock_socket is a distinct class and is unaffected.
+neverallow xrom_isolated_payload self:socket *;
+
+# --- netlink ---------------------------------------------------------------
+# Netlink is a socket family that talks to the kernel rather than to a network,
+# which is why it is easy to overlook in a "no external communication" policy:
+# netlink_route_socket can enumerate and then modify the routing table, and
+# netlink_xfrm_socket can install IPsec policy that redirects traffic. Every
+# family below is one a measured, single-purpose task payload has no reason to
+# open.
+#
+# Four families are deliberately NOT listed: netlink_socket (the generic class,
+# which base policy grants broadly), netlink_kobject_uevent_socket and
+# netlink_selinux_socket (used by ordinary guest userspace for uevents and for
+# reading the enforcing state) and netlink_audit_socket (used by the guest's own
+# auditing). Asserting on those would contradict unconditional AOSP allows and
+# break the build without closing a real hole. This payload reads the enforcing
+# state itself, which is why netlink_selinux_socket has to stay available.
+neverallow xrom_isolated_payload self:{
+    netlink_route_socket
+    netlink_xfrm_socket
+    netlink_netfilter_socket
+    netlink_nflog_socket
+    netlink_dnrt_socket
+    netlink_tcpdiag_socket
+    netlink_ip6fw_socket
+    netlink_scsitransport_socket
+    netlink_rdma_socket
+    netlink_crypto_socket
+    netlink_smc_socket
+    netlink_generic_socket
+    netlink_fib_lookup_socket
+    netlink_connector_socket
+    netlink_iscsi_socket
+    netlink_firewall_socket
+} *;
+
+# --- what IS allowed, stated positively ------------------------------------
+# The payload binds, listens and accepts on AF_VSOCK, and connects nowhere else.
+# AOSP's Microdroid policy already grants the payload vsock access for its own
+# RPC use; these rules are stated here anyway so that the positive half of the
+# assertion lives next to the negative half, and so that a future Microdroid
+# release that narrows the base grant breaks this build instead of silently
+# breaking the data plane. Redundant allow rules are merged by the policy
+# compiler and cost nothing.
+allow microdroid_payload self:vsock_socket {
+    create
+    bind
+    listen
+    accept
+    connect
+    read
+    write
+    getattr
+    setattr
+    getopt
+    setopt
+    shutdown
+};
+
+# Nothing in the VM may read the material pvmfw derived. The per-VM secret is
+# the root of the VM's identity; a payload that could read it could impersonate
+# the VM to the host and to remote attestation.
+neverallow xrom_isolated_payload microdroid_manager:file { read write open };
+neverallow xrom_isolated_payload microdroid_manager:dir { read open add_name remove_name };

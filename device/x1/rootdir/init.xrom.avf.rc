@@ -1,0 +1,48 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# init.xrom.avf.rc — installed to /system_ext/etc/init/init.xrom.avf.rc
+#
+
+on post-fs-data
+    # Per-VM state: instance ids, .idsig files, instance.img, VM logs.
+    #
+    # 0700 system:system is not decoration. sepolicy has a neverallow that no
+    # domain except xrom_avfd and init may open files under this label, and
+    # virtualizationservice/crosvm are handed these files as *file descriptors*
+    # over binder rather than being given a path they could open. A directory
+    # readable by anything else would turn that fd-passing discipline into
+    # theatre.
+    mkdir /data/misc/xrom 0751 system system
+    mkdir /data/misc/xrom/avf 0700 system system
+    # Task input drop box. 0770 system:system so that only a caller already in
+    # the system group can place input here at all; IsolationPolicy then confines
+    # every request to this directory, and the daemon re-opens the file with
+    # O_NOFOLLOW and re-checks it against the submitted digest.
+    mkdir /data/misc/xrom/inbox 0770 system system
+    restorecon_recursive /data/misc/xrom
+
+# ---------------------------------------------------------------------------
+# xrom_avfd — AVF orchestration daemon
+# ---------------------------------------------------------------------------
+# Runs as uid system on purpose: virtualizationservice's permission checks
+# (MANAGE_VIRTUAL_MACHINE / USE_CUSTOM_VIRTUAL_MACHINE) resolve through
+# PermissionManagerService, which grants everything to uid 0 and uid 1000.
+# The daemon's real confinement is SELinux, not its uid — see
+# sepolicy/system_ext_private/xrom_avfd.te, which denies it /dev/kvm, ptrace,
+# and every capability it does not need.
+#
+# No `seclabel` here: the domain transition is derived from the binary's label
+# in file_contexts by init_daemon_domain(xrom_avfd), which is the mechanism
+# that keeps working when the binary moves. A hard-coded seclabel would not.
+#
+# No `critical`: a crash loop in xrom_avfd must not reboot the phone during
+# bring-up. Isolation failures are fail-closed at the daemon level instead —
+# see IsolationPolicy, which denies by default.
+service xrom_avfd /system_ext/bin/xrom_avfd
+    class core
+    user system
+    group system
+    task_profiles ServiceCapacityLow
+    ioprio rt 4

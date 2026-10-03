@@ -1,0 +1,151 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/xrom_sentineld.te — the implementation half.
+#
+# Every permission below is one the daemon actually uses, and every neverallow is a
+# property the design depends on. Neither list is aspirational: a rule that is not
+# needed is an attack surface, and a neverallow that is not enforced is a comment.
+#
+
+init_daemon_domain(xrom_sentineld)
+
+# ---------------------------------------------------------------------------
+# Binder
+# ---------------------------------------------------------------------------
+# Registered under android.xrom.recovery.IXRecoveryService/xrom_recovery.
+allow xrom_sentineld xrom_recovery_service:service_manager add;
+binder_use(xrom_sentineld)
+# Clients reach it through xrom_sentineld_client(), which grants find + binder_call
+# per domain. The default is that nothing can.
+
+# Reaches netd for the firewall-chain layer of the network cut, and reads the boot
+# slot state. Both are one-way calls: netd is not a client of this service.
+binder_call(xrom_sentineld, netd)
+
+# ---------------------------------------------------------------------------
+# /misc — the bootloader control block
+# ---------------------------------------------------------------------------
+allow xrom_sentineld misc_block_device:blk_file { read write open getattr ioctl seek };
+allow xrom_sentineld block_device:dir search;
+
+# ---------------------------------------------------------------------------
+# The vault
+# ---------------------------------------------------------------------------
+# The IMAGE partition is read-only here, and that is enforced below by a neverallow
+# rather than by the daemon being careful. Only xrom_ota_installer writes it.
+allow xrom_sentineld xrom_vault_device:blk_file { read open getattr ioctl seek };
+# The METADATA partition is owned by this daemon: it holds the VaultRecord, which is
+# where the sentinel's own boot-loop counter lives. Two devices rather than one
+# because SELinux labels block devices and cannot separate one offset from another.
+allow xrom_sentineld xrom_vault_meta_device:blk_file { read write open getattr ioctl seek };
+
+# The running slot, for the post-boot integrity comparison. Read only, and only at
+# the depth the configuration asks for.
+allow xrom_sentineld system_block_device:blk_file { read open getattr ioctl seek };
+
+# ---------------------------------------------------------------------------
+# State, evidence and the monitored directory
+# ---------------------------------------------------------------------------
+allow xrom_sentineld xrom_sentinel_data_file:dir { add_name create_dir_perms };
+allow xrom_sentineld xrom_sentinel_data_file:file { create_file_perms };
+
+# The monitored directory is /data/misc/xrom/inbox, which is labelled
+# xrom_avfd_data_file and owned by xrom_avfd. "Locking" it means chmod 0700, which
+# needs setattr on the DIRECTORY only — no open, no create, no write, and no access
+# to anything inside it. The existing neverallow over xrom_avfd_data_file forbids
+# other domains from opening, creating, writing and appending FILES and from
+# add_name/remove_name/create on DIRECTORIES; getattr/setattr/search on the
+# directory is outside all of it, so this grant does not contradict that chain.
+#
+# Deliberately minimal for that reason: the sentinel can make the directory
+# inaccessible to the world and it cannot read, add to, or remove anything the
+# AVF daemon put there.
+allow xrom_sentineld xrom_avfd_data_file:dir { getattr setattr search };
+
+# Reading the bootloader's slot decision and publishing the quarantine notice.
+allow xrom_sentineld xrom_recovery_prop:property_service set;
+get_prop(xrom_sentineld, xrom_recovery_prop)
+get_prop(xrom_sentineld, bootloader_prop)
+get_prop(xrom_sentineld, bootloader_boot_reason_prop)
+
+# android.sys.powerctl, to reboot. Granted as a property write to the specific
+# powerctl type rather than as sys_boot, so that init performs the reboot and the
+# daemon cannot do anything else with the capability.
+set_prop(xrom_sentineld, powerctl_prop)
+
+# ---------------------------------------------------------------------------
+# Capabilities
+# ---------------------------------------------------------------------------
+# NET_ADMIN is the only capability granted, and it is for exactly one thing: the
+# SIOCSIFFLAGS layer of the network cut, which is the layer that works when netd
+# does not. See correction #10 in docs/05.
+allow xrom_sentineld self:capability net_admin;
+
+# ---------------------------------------------------------------------------
+# Neverallows — the properties the design depends on
+# ---------------------------------------------------------------------------
+
+# The vault image is never written by this daemon. This is the enforcement half of
+# "only the OTA installer may write the vault"; without it the claim is a comment.
+neverallow xrom_sentineld xrom_vault_device:blk_file { write append setattr };
+
+# No hypervisor access and no VM sockets. This daemon must not be able to start a VM:
+# if it needs evidence preserved inside a pVM it asks xrom_avfd over binder and is
+# subject to the same IsolationPolicy as every other client. A recovery daemon that
+# can open /dev/kvm turns every bug in it into a hypervisor-escape primitive, which is
+# the same argument the existing xrom_avfd policy makes about itself.
+neverallow xrom_sentineld kvm_device:chr_file *;
+neverallow xrom_sentineld self:vsock_socket *;
+
+# No module loading, no raw I/O beyond the block devices granted above, no ptrace,
+# and no ability to override or administer the MAC policy itself. A daemon that can
+# relabel files or bypass SELinux can undo every restriction in this file.
+neverallow xrom_sentineld self:capability { sys_module sys_rawio sys_ptrace sys_admin dac_override dac_read_search sys_boot };
+neverallow xrom_sentineld self:capability2 { mac_admin mac_override syslog block_suspend };
+
+# It may not read the payload trust material. It has no reason to: it does not verify
+# payloads, and a recovery daemon that can read the signing anchors is one more path
+# to them.
+neverallow xrom_sentineld xrom_payload_trust_file:file { read open getattr };
+
+# Its own state is its own. Mirrors the existing xrom_avfd_data_file rule so that a
+# compromise of either daemon does not become a compromise of the other's audit trail.
+neverallow { domain -xrom_sentineld -init } xrom_sentinel_data_file:file { open create write append };
+neverallow { domain -xrom_sentineld -init } xrom_sentinel_data_file:dir { add_name remove_name create };
+
+# Nothing else may register the recovery service.
+neverallow { domain -init -xrom_sentineld } xrom_recovery_service:service_manager add;
+# And no app may find it, privileged or not, unless a policy author explicitly calls
+# xrom_sentineld_client() for its domain. A service that can reboot the device is not
+# one an app should be able to resolve by name.
+neverallow { appdomain } xrom_recovery_service:service_manager find;
+
+# ---------------------------------------------------------------------------
+# /misc WRITERS — CORRECTION #2
+# ---------------------------------------------------------------------------
+# The requirement specified:
+#
+#     neverallow { domain -xrom_avfd } misc_block_device:blk_file write;
+#
+# That rule does not harden anything; it stops the build. neverallow is checked at
+# policy compile time against every allow rule in the whole policy, including AOSP's,
+# and AOSP grants misc write to several domains that have to have it:
+#
+#   recovery        reads and clears the BCB, and runs fastbootd and misc_writer
+#   uncrypt         maps a /data OTA package into /cache blocks and writes
+#                   wipe_package
+#   update_engine   updates A/B slot metadata
+#   hal_boot_default  the boot control HAL, which decrements tries_remaining —
+#                   the platform boot counter X-ROM reads and never writes
+#   init            early boot misc handling
+#
+# Naming xrom_avfd as the sole exception would also be wrong on its own terms: the AVF
+# daemon has no business writing /misc at all, and granting it that would widen the one
+# domain in this tree whose whole design is that a bug in it cannot reach the hardware.
+#
+# So the rule below is an explicit allowlist rather than a single exception. It is a
+# real restriction — every domain not named is denied, and the build enforces it — and
+# it is one that the policy can actually satisfy.
+neverallow { domain -xrom_sentineld -recovery -uncrypt -update_engine -hal_boot_default -init } misc_block_device:blk_file write;

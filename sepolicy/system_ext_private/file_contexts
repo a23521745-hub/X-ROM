@@ -1,0 +1,57 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/file_contexts
+#
+# Installed as /system_ext/etc/selinux/system_ext_file_contexts.
+#
+
+# The AVF orchestration daemon. This label is what init_daemon_domain() matches
+# on to transition init -> xrom_avfd; if it does not match, the daemon runs in
+# the init domain with init's permissions, which is the single worst way this
+# file can be wrong.
+/system_ext/bin/xrom_avfd                 u:object_r:xrom_avfd_exec:s0
+
+# Daemon configuration.
+/system_ext/etc/xrom/avf\.json            u:object_r:xrom_avfd_config_file:s0
+
+# Microdroid payload APK, installed by the android_app module XVaultPayload.
+# The path must match kPayloadApkRoot in services/avf/xrom_avfd/VmSpec.h;
+# tools/xrom_preflight.py checks that the two agree.
+/system_ext/app/XVaultPayload(/.*)?       u:object_r:xrom_vault_payload_file:s0
+
+# Payload trust material. The path must match kPayloadTrustRoot in
+# services/avf/xrom_avfd/VmSpec.h; tools/xrom_preflight.py checks that they agree.
+/system_ext/etc/xrom/trust(/.*)?          u:object_r:xrom_payload_trust_file:s0
+
+# Per-VM state.
+/data/misc/xrom(/.*)?                     u:object_r:xrom_avfd_data_file:s0
+
+# The self-healing recovery daemon. Same reasoning as xrom_avfd above: this label is
+# what init_daemon_domain() matches on to transition init -> xrom_sentineld, and if it
+# does not match the daemon runs in the init domain with init's permissions.
+/system_ext/bin/xrom_sentineld            u:object_r:xrom_sentineld_exec:s0
+
+# The vault writer. Separate binary, separate domain, separate label — the split is
+# what lets the writer be denied every network class.
+/system_ext/bin/xrom_ota_installer        u:object_r:xrom_ota_installer_exec:s0
+
+# Sentinel runtime configuration.
+/system_ext/etc/xrom/sentinel\.json       u:object_r:xrom_avfd_config_file:s0
+
+# Sentinel state. MUST be more specific than the /data/misc/xrom(/.*)? entry above,
+# and it is: the longest matching prefix wins. Without this entry the subtree would be
+# labelled xrom_avfd_data_file and the sentinel could not write its own incident log
+# without violating the existing neverallow over that type.
+/data/misc/xrom/sentinel(/.*)?            u:object_r:xrom_sentinel_data_file:s0
+
+# The vault. Both halves, labelled separately because they are written by different
+# domains under different neverallows.
+/dev/block/by-name/xrom_vault             u:object_r:xrom_vault_device:s0
+/dev/block/by-name/xrom_vault_meta        u:object_r:xrom_vault_meta_device:s0
+
+# OTA trust material. The path must match kDefaultTrustPath in
+# services/ota/xrom_ota_installer/main.cpp; tools/xrom_preflight.py checks that the two
+# agree.
+/system_ext/etc/xrom/ota-trust(/.*)?        u:object_r:xrom_ota_trust_file:s0

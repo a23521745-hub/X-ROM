@@ -1,0 +1,23 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_public/service.te — exported service types.
+#
+
+# android.xrom.isolation.IXIsolationService/xrom_isolation
+#
+# Not marked app_api_service or system_api_service: X-ROM does not want third
+# party apps, or even ordinary platform apps, resolving this name. Reachability
+# is granted per-domain through xrom_avfd_client() in xrom_avfd.te, and the
+# private policy carries a neverallow that makes "everything else" explicit.
+type xrom_avf_service, service_manager_type;
+
+# android.xrom.recovery.IXRecoveryService/xrom_recovery
+#
+# The self-healing recovery service. Not marked app_api_service or
+# system_api_service, for the same reason as xrom_avf_service and with more force:
+# this service writes /misc and reboots the device, so reachability is granted
+# per-domain through xrom_sentineld_client() and the private policy makes
+# "everything else" explicit with a neverallow.
+type xrom_recovery_service, service_manager_type;

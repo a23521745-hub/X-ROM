@@ -1,0 +1,87 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// X-ROM isolation service AIDL.
+//
+// Platform-internal, CPP backend only. It is not a vendor HAL and it crosses no
+// Treble boundary, so it carries no stability annotation and no VINTF entry —
+// adding @VintfStability would oblige X-ROM to keep a vendor-facing ABI frozen
+// for an interface only system_ext code is allowed to call.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+aidl_interface {
+    name: "xrom_isolation",
+    srcs: ["android/xrom/isolation/*.aidl"],
+    owner: "xrom",
+
+    // No frozen versions yet: the interface is still being designed. Soong
+    // requires this on Android 14+; on an Android 13 baseline the property does
+    // not exist and must be removed, since an unknown Soong property is an
+    // error rather than a warning.
+    frozen: false,
+
+    backends: {
+        cpp: {
+            enabled: true,
+        },
+        // Disabled deliberately. Each enabled backend is ABI surface X-ROM has
+        // to keep working forever; the daemon and its only clients are C++.
+        java: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: false,
+        },
+        rust: {
+            enabled: false,
+        },
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Self-healing recovery service
+// ---------------------------------------------------------------------------
+// Separate interface from xrom_isolation rather than new methods on it, for two
+// reasons.
+//
+// The first is the constraint this project works under: IXIsolationService and the
+// vsock data plane are frozen, and adding methods to a frozen interface is exactly
+// the change that constraint exists to prevent.
+//
+// The second is authority. IXRecoveryService writes the bootloader control block in
+// /misc, drops the network through netd, locks a monitored directory and reboots
+// the device. That is a far larger grant than "start a VM with this payload", and
+// keeping it in its own interface is what lets SELinux hand it to a different,
+// much smaller set of callers — and lets a future change to VM orchestration be
+// reviewed without re-reviewing the recovery path.
+aidl_interface {
+    name: "xrom_recovery",
+    srcs: ["android/xrom/recovery/*.aidl"],
+    owner: "xrom",
+
+    // Same reasoning as xrom_isolation: still being designed, so no frozen
+    // versions. On an Android 13 baseline this property does not exist and must be
+    // removed, since an unknown Soong property is an error rather than a warning.
+    frozen: false,
+
+    backends: {
+        cpp: {
+            enabled: true,
+        },
+        // Disabled deliberately. The sentinel, the recovery gate and the OTA
+        // installer are all C++; every enabled backend is ABI surface that has to
+        // keep working forever.
+        java: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: false,
+        },
+        rust: {
+            enabled: false,
+        },
+    },
+}

@@ -1,0 +1,38 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// The hybrid OTA core: the update.json manifest and the staged verifier that
+// decides whether a download may start, whether what arrived may be installed,
+// and whether what was installed is the image that was signed.
+//
+// The signature verification itself is behind SignatureBackend, an abstract
+// interface with one method. The production adapter lives in
+// services/ota/xrom_ota_installer and uses BoringSSL; the tests use a fake. That
+// seam is the reason the whole staged order — including every refusal branch, most
+// of which will fire at most a handful of times in the field — can be executed on a
+// build host instead of on a device that is already in recovery.
+//
+// recovery_available because the recovery image performs the same checks before it
+// agrees to download anything; host_supported for tools/hostcheck.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_library_static {
+    name: "libxrom_ota_core",
+    srcs: [
+        "OtaManifest.cpp",
+        "OtaVerifier.cpp",
+    ],
+    export_include_dirs: ["."],
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    host_supported: true,
+    recovery_available: true,
+    apex_available: ["//apex_available:any"],
+}

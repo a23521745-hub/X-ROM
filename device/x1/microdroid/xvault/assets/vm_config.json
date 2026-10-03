@@ -1,0 +1,10 @@
+{
+  "os": {
+    "name": "microdroid"
+  },
+  "task": {
+    "type": "microdroid_launcher",
+    "command": "libxvault_payload.so"
+  },
+  "export_tombstones": true
+}

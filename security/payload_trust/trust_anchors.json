@@ -1,0 +1,20 @@
+{
+  "trust_anchors": [
+    {
+      "key_id": "xrom-payload-dev-ed25519-01",
+      "algorithm": "ED25519",
+      "public_key_base64": "MCowBQYDK2VwAyEA/hpWJ5TEbJQRGy7hMRKUblvrFW1qw/xmyiVUYQ4njnM=",
+      "min_security_version": 0,
+      "enabled": true,
+      "description": "X-ROM development payload signing key (Ed25519). Public half only; the private key is never committed."
+    },
+    {
+      "key_id": "xrom-payload-dev-rsa4096-01",
+      "algorithm": "RSA4096_SHA256",
+      "public_key_base64": "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAwpTeA+vYyKRhlOZ3mzF0w3mCU/QauLe2JOAwHItoQsdgxn5wuiZchImKkodixorC81TQep8isz4cSm7AEqgkQLdEeyBXBIDI9VmcX5mBqvs+da7diSkJSpWJfXia1Vzy1NrJR5LPUXhm123rciWCcCCxwCK2WcyYjU586mE4id1x/ZGtLtczhKFtpVLcnEuf+GovvFR0qRojCZsVPt/+bDE9YDprYp4msv317FhsNR2npjPPoaFFLflykBI+GapyKR7nMpYvVQtUxvDPGO48n8JqDk6bSW8Flv3RbK+4aiaahUXm2IiR86atmwnI0M0FNQAt0mM6M2N9ui02spKypiFgdLXZXLVRXSX3ECqwk2O5mrteU/TodAA+/4CSIdbXabt20W5LGqEUE5byVw37GgNHP12IxcK8D0+E+oPUbqyIDpXiBH167xpotIoO9hYm0oFF3rt5azChGFgiDrkHQyab8rE51V4cXSQi6Eh9UgT6Y1RPdgjotdaQpJMngh1w5XOheQc8iETFH2KiYEX6VG3HH+5zuDd+GgFFcAX4ywngXepHDx4G77hbPL0L/ZscD6qAyGas4F5JjsdCzGo/mw+3c1aV/Ybu2rI6PEPVwOmtjkpuX44by/29YktsAKlrba18gHY2ymnlK/J8LzCLSfi6aBrqOECyRmOq2IGsWdkCAwEAAQ==",
+      "min_security_version": 0,
+      "enabled": true,
+      "description": "X-ROM development payload signing key (RSA-4096/SHA-256). Public half only."
+    }
+  ]
+}

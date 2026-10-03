@@ -1,0 +1,37 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// Host tests for the code the host daemon and the Microdroid payload share:
+// SHA-256, the wire codec and the framed vsock transport.
+//
+// These are the tests that make the data plane safe to change. Everything in
+// common/ is dependency-free by design, so all three suites build and run with
+// nothing but a C++ compiler — `tools/hostcheck/run_host_tests.sh` runs the same
+// source files with a system g++ on a machine that has no AOSP tree at all, and
+// `atest xrom_shared_core_test` runs them here. One set of assertions, two
+// runners, so a test cannot pass in one place and silently not exist in the other.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_test {
+    name: "xrom_shared_core_test",
+    host_supported: true,
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    srcs: [
+        "Sha256_test.cpp",
+        "VsockChannel_test.cpp",
+        "VsockProtocol_test.cpp",
+    ],
+
+    // libxrom_vsock_channel pulls in libxrom_vsock_protocol and libxrom_sha256
+    // through its own static_libs and export_static_lib_headers, so listing the
+    // three here would compile nothing twice and only add noise.
+    static_libs: ["libxrom_vsock_channel"],
+}

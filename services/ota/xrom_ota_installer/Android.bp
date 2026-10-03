@@ -1,0 +1,52 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// xrom_ota_installer — the only binary in the system that may write the vault image.
+//
+// Split the same way as the other two daemons: libxrom_ota_core holds every decision
+// and is host-testable; this binary holds the trust-material loading, the BoringSSL
+// signature backend and the block writes.
+//
+// Its sepolicy denies it every socket class. The recovery image downloads and this
+// binary writes, so compromising the writer does not also give an attacker a delivery
+// channel. That split is the reason there are two executables in the OTA path rather
+// than one.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_binary {
+    name: "xrom_ota_installer",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wimplicit-fallthrough",
+    ],
+    local_include_dirs: ["."],
+    srcs: [
+        "OtaTrust.cpp",
+        "main.cpp",
+    ],
+    static_libs: [
+        // The staged verifier and the manifest. Pulls in libxrom_recovery_core for the
+        // vault record, and libxrom_sha256 through it.
+        "libxrom_ota_core",
+        "libxrom_recovery_core",
+        "libxrom_sha256",
+    ],
+    shared_libs: [
+        "libbase",
+        // Signature verification only: Ed25519 and RSA-4096/SHA-256 over the exact
+        // bytes of update.json and of the package. X-ROM never implements a signature
+        // scheme itself.
+        "libcrypto",
+        "libcutils",
+        "libjsoncpp",
+        "liblog",
+        "libutils",
+    ],
+    system_ext_specific: true,
+}

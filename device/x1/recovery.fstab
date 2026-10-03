@@ -1,0 +1,53 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# recovery.fstab for the X-ROM x1 reference board.
+#
+# Consumed by the recovery image and by bootable/xrom_recovery_gate, which needs to
+# know where the vault is before there is a mounted /data to read a configuration from.
+# In recovery there is no property service worth trusting and no daemon to ask, so the
+# partition map is the only source of truth available.
+#
+# FLAGS ON THE VAULT ENTRIES ARE THE SECURITY PROPERTY, NOT DECORATION
+# --------------------------------------------------------------------
+# `ro` and `first_stage_mount` are absent from xrom_vault on purpose, and `noemulatedsd`
+# plus the explicit `ro` are what keep it that way. The vault image partition is never
+# mounted read-write by anything: the OTA installer writes the block device directly,
+# which is how update_engine writes an inactive slot, and mounting it rw to install into
+# it would put a second writer in front of the same bytes dm-verity is checking.
+#
+# The metadata partition is mounted read-write ONLY in recovery, and only so that the
+# recovery gate can record what it did. In the normal boot it is not mounted at all;
+# xrom_sentineld opens the block device directly, which needs no mount and therefore
+# cannot be widened by one.
+#
+# `slotselect` is on system and not on the vault. The vault holds one known-good image
+# for both slots, because a per-slot fallback would double the space for a copy that is
+# only ever used when the slot it mirrors is already broken.
+#
+
+#<src>                                          <mnt_point>   <type>  <mnt_flags and options>              <fs_mgr_flags>
+system                                          /system       ext4    ro,barrier=1                          wait,slotselect,avb=vbmeta_system
+system_ext                                      /system_ext   ext4    ro,barrier=1                          wait,slotselect,avb=vbmeta_system_ext
+vendor                                          /vendor       ext4    ro,barrier=1                          wait,slotselect,avb=vbmeta
+product                                         /product      ext4    ro,barrier=1                          wait,slotselect,avb=vbmeta
+data                                            /data         f2fs    noatime,nosuid,nodev,discard,reserve_root=32768,inlinecrypt   latemount,wait,check,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0,metadata_encryption=aes-256-xts:wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption,quota,reservedsize=128M,checkpoint=fs
+misc                                            /misc         emmc    defaults                            defaults
+metadata                                        /metadata     ext4    noatime,nosuid,nodev,discard        wait,first_stage_mount
+boot                                            /boot         emmc    defaults                            first_stage_mount,nofail,slotselect,avb=boot
+
+# ---------------------------------------------------------------------------
+# xrom_vault — the recovery fallback image
+# ---------------------------------------------------------------------------
+# Read-only, no slotselect, and never mounted rw. The recovery gate reads the image
+# from here when the hybrid decision engine selects the vault, which is the answer it
+# gives whenever any single signal is unknown or suspicious.
+/dev/block/by-name/xrom_vault                   /xrom_vault   ext4    ro,barrier=1,noauto_da_alloc        wait,noemulatedsd,recoveryonly
+
+# ---------------------------------------------------------------------------
+# xrom_vault_meta — 64 KiB holding the VaultRecord
+# ---------------------------------------------------------------------------
+# State, digests, package identity and the sentinel's own boot-loop counter. Mounted
+# in recovery only; in the normal boot xrom_sentineld opens the block device directly.
+/dev/block/by-name/xrom_vault_meta              /xrom_vault_meta  ext4  rw,barrier=1,noauto_da_alloc      wait,noemulatedsd,recoveryonly

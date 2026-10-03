@@ -1,0 +1,194 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/xrom_avfd.te — implementation policy for the X-ROM AVF
+# daemon. Nothing here is visible to vendor; it can change on every build.
+#
+# Design rule for this file: every allow must name a capability the daemon
+# actually uses, and every absence of an allow must be either obvious or
+# covered by an explicit neverallow. A hardened OS cannot rely on "we just
+# didn't think to add it".
+#
+# Portability: this policy is written for Android 13 through current. It
+# therefore only references AVF types that exist across that whole range
+# (virtualizationservice, crosvm, kvm_device, virtualizationservice_data_file,
+# hypervisor_prop). Types that appeared later — virtualizationmanager,
+# sysfs_dt_avf, vfio_handler — are deliberately not named here; see the comment
+# at each place they would otherwise have been used.
+#
+
+typeattribute xrom_avfd coredomain;
+
+# ===========================================================================
+# 1. Domain lifecycle and IPC
+# ===========================================================================
+# Transitions from init on exec of a file labelled xrom_avfd_exec.
+init_daemon_domain(xrom_avfd)
+
+binder_use(xrom_avfd)
+
+# Publishes android.xrom.isolation.IXIsolationService/xrom_isolation.
+add_service(xrom_avfd, xrom_avf_service)
+
+# ===========================================================================
+# 2. AVF / Microdroid access
+# ===========================================================================
+# This is the single AOSP-provided macro that makes a domain an AVF client, and
+# it is the reason X-ROM does not hand-roll VM policy. Depending on the AOSP
+# revision it expands to either:
+#
+#   Android 13/14 — find virtualization_service, binder_call both ways with
+#                   virtualizationservice, fd + fifo sharing with
+#                   virtualizationservice and crosvm, vsock read/write on VMs
+#                   the client owns, get_prop(hypervisor_prop), and read access
+#                   to virtualizationservice_data_file for crashdumps.
+#   Android 15+   — the same shape, except the client exec()s virtmgr /
+#                   virtualizationmanager and talks to that child over a unix
+#                   socket instead of binding to the long-running service.
+#
+# Using the macro rather than copying one revision's expansion is what keeps
+# X-ROM correct across that transition, and it means the vsock we use to reach
+# the payload is always one virtualizationservice created for a VM we own.
+virtualizationservice_use(xrom_avfd)
+
+# ===========================================================================
+# 3. Own data: /data/misc/xrom/avf
+# ===========================================================================
+# Holds allocated VM instance ids, .idsig digests, per-VM instance.img state and
+# VM console/OS logs.
+#
+# The invariant copied from AOSP's own crosvm.te: virtualizationservice and
+# crosvm receive these files as *inherited file descriptors*, so they need
+# read/write on the file type but never `open`. Granting `open` would let the
+# VMM walk our directory by path, which is the difference between a sandboxed
+# VMM and a privileged one.
+allow { virtualizationservice crosvm } xrom_avfd_data_file:dir search;
+allow { virtualizationservice crosvm } xrom_avfd_data_file:file { getattr read write ioctl lock };
+
+allow xrom_avfd xrom_avfd_data_file:dir create_dir_perms;
+allow xrom_avfd xrom_avfd_data_file:file create_file_perms;
+allow xrom_avfd xrom_avfd_data_file:lnk_file { create getattr read unlink };
+
+# ===========================================================================
+# 4. Payload artifacts: /system_ext/app/XVaultPayload
+# ===========================================================================
+# The Microdroid payload APK (XVaultPayload.apk) and its vm_config.json ship
+# read-only on a verified partition. Read-only is load-bearing: the APK's
+# fs-verity digest is measured into the VM identity by pvmfw, so a payload path
+# that anything could write would let a compromised host boot a VM that still
+# *attests* as the original.
+#
+# Same fd-passing invariant as section 3 for the VMM side.
+allow xrom_avfd xrom_vault_payload_file:dir r_dir_perms;
+allow xrom_avfd xrom_vault_payload_file:file r_file_perms;
+allow { virtualizationservice crosvm } xrom_vault_payload_file:file { getattr read ioctl lock };
+
+# ===========================================================================
+# 5. Runtime configuration: /system_ext/etc/xrom/avf.json
+# ===========================================================================
+allow xrom_avfd xrom_avfd_config_file:dir r_dir_perms;
+allow xrom_avfd xrom_avfd_config_file:file r_file_perms;
+
+# ===========================================================================
+# 5b. Payload trust material: /system_ext/etc/xrom/trust
+# ===========================================================================
+# trust_anchors.json, the signed manifest and its detached signature. Read-only,
+# and the only reader is the daemon: PayloadVerifier::Verify() runs before
+# AvfController::StartVm(), so a launch that gets as far as pvmfw has already
+# passed this check. There is no write access from any domain at runtime, which
+# is what makes "the trust anchors did not change since the build" a statement
+# the SELinux policy enforces rather than one the code hopes for.
+allow xrom_avfd xrom_payload_trust_file:dir r_dir_perms;
+allow xrom_avfd xrom_payload_trust_file:file r_file_perms;
+
+# ===========================================================================
+# 6. Properties
+# ===========================================================================
+# Read-only facts about the hypervisor, labelled hypervisor_prop by AOSP and
+# derived from ro.boot.hypervisor.* / ro.boot.pkvm.* in /proc/bootconfig. The
+# macro in section 2 already grants this; the explicit rule documents that
+# X-ROM depends on it rather than accidentally inheriting it.
+get_prop(xrom_avfd, hypervisor_prop)
+
+# NOTE: pKVM availability also shows up as hypervisor_restricted_prop
+# (ro.boot.pkvm.enabled, ro.boot.hypervisor.vm.protected). That type exists on
+# some AOSP revisions and not others, so X-ROM does not reference it: the daemon
+# asks virtualizationservice whether protected VMs are usable instead of parsing
+# a property whose label is not portable. Fewer moving parts, and it cannot
+# disagree with what the hypervisor will actually do.
+
+# ro.xrom.avf.* is loaded from /system_ext/build.prop by init.
+set_prop(init, xrom_avf_prop)
+
+# xrom.avf.* is runtime state written by the daemon, mirroring the AOSP pattern
+# used for virtualizationservice_prop, including the per-type neverallow below.
+set_prop(xrom_avfd, xrom_avf_prop)
+get_prop(xrom_avfd, xrom_avf_prop)
+
+# ===========================================================================
+# 7. Everything else the daemon genuinely needs
+# ===========================================================================
+# Raising RLIMIT_MEMLOCK so VM memory and page tables can be locked. This is
+# the same capability virtualizationservice takes for the same reason; without
+# it a pVM's pages can be swapped, which is a confidentiality problem the
+# hypervisor cannot solve.
+allow xrom_avfd self:capability sys_resource;
+
+# Sizing VMs against real available memory rather than a guess.
+r_dir_file(xrom_avfd, proc_meminfo)
+
+# NOTE: sysfs_dt_avf (/sys/firmware/devicetree/base/avf) is the other place AVF
+# capability information is published, but the type only exists from Android 14
+# onward. It is not referenced here so that this file compiles on an Android 13
+# baseline; add `r_dir_file(xrom_avfd, sysfs_dt_avf)` when the minimum supported
+# release is raised.
+
+# ===========================================================================
+# 8. Neverallow — the part that makes this a security policy
+# ===========================================================================
+# /dev/kvm belongs to crosvm and nobody else. If xrom_avfd could open it, a bug
+# in the daemon would be a hypervisor-escape primitive and the entire point of
+# confining the VMM into its own domain would be lost.
+neverallow xrom_avfd kvm_device:chr_file *;
+
+# No process-wide privilege escalation. sys_module (load kernel code),
+# sys_rawio (port I/O / physical memory), sys_admin (mount, namespaces) and
+# sys_ptrace have no business in a daemon whose job is to hand file descriptors
+# to a VMM.
+neverallow xrom_avfd self:capability { sys_module sys_rawio sys_admin sys_ptrace sys_boot dac_override dac_read_search };
+neverallow xrom_avfd self:capability2 { mac_admin mac_override syslog };
+
+# The daemon must not debug, signal or trace anything it did not start. VM
+# processes are crosvm's children, not ours.
+neverallow xrom_avfd { domain -init -xrom_avfd }:process ptrace;
+
+# The daemon is a vsock *client*. It reaches payloads through sockets that
+# virtualizationservice created and handed over as file descriptors, so it must
+# never be able to open a listening vsock of its own — that would be a second,
+# unaudited channel into every VM on the device.
+neverallow xrom_avfd self:vsock_socket { create bind listen accept };
+
+# Only we and init may open or create our VM state. Note this is deliberately
+# stricter than AOSP's own virtualizationservice_data_file, which other domains
+# may read for crashdumps. X-ROM's VM state can contain payload output.
+neverallow { domain -xrom_avfd -init } xrom_avfd_data_file:file { open create write append };
+neverallow { domain -xrom_avfd -init } xrom_avfd_data_file:dir { add_name remove_name create };
+
+# The payload directory is a measured artifact: nothing writes it at runtime.
+neverallow { domain -init } xrom_vault_payload_file:file { write append setattr };
+
+# Nothing writes the trust material either, and nothing but the daemon reads it.
+# The read side matters as much as the write side: a domain that can read the
+# anchors learns exactly which keys X-ROM accepts, which is reconnaissance for
+# whoever is trying to get a manifest signed.
+neverallow { domain -init } xrom_payload_trust_file:file { write append setattr create unlink rename };
+neverallow { domain -xrom_avfd -init } xrom_payload_trust_file:file { read open getattr };
+
+# Nobody may republish or spoof our service name, and no app domain may resolve
+# it at all — reachability is granted per-domain by xrom_avfd_client().
+neverallow { domain -xrom_avfd -init } xrom_avf_service:service_manager add;
+neverallow { appdomain -priv_app -system_app } xrom_avf_service:service_manager find;
+
+# Only xrom_avfd may set the runtime AVF state properties.
+neverallow { domain -init -xrom_avfd } xrom_avf_prop:property_service set;

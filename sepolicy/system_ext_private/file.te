@@ -1,0 +1,76 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_private/file.te — X-ROM file types.
+#
+# core_data_file_type marks these as platform-owned data, which is what keeps
+# them on the correct side of the Treble policy boundary: a vendor image must
+# not be able to name them.
+#
+
+# /data/misc/xrom and /data/misc/xrom/avf
+# Per-VM state owned by xrom_avfd: allocated instance ids, .idsig digests,
+# instance.img, VM console and OS logs.
+type xrom_avfd_data_file, file_type, data_file_type, core_data_file_type;
+
+# /system_ext/app/XVaultPayload
+# The Microdroid payload APK, with assets/vm_config.json and
+# jni/arm64-v8a/libxvault_payload.so inside it. Lives on
+# a read-only, fs-verity-covered, AVB-verified partition because its digest is
+# measured into the protected VM's identity by pvmfw.
+type xrom_vault_payload_file, file_type, system_file_type;
+
+# /system_ext/etc/xrom/avf.json
+# Daemon configuration: task-class allowlist, resource ceilings, concurrency
+# limits. A separate type from the payload so that a config-parsing bug can be
+# denied payload access without either grant having to change.
+type xrom_avfd_config_file, file_type, system_file_type;
+
+# /system_ext/etc/xrom/trust
+# Payload trust material: trust_anchors.json (the pinned public keys), the
+# signed xrom_payload_manifest.json and its detached .sig. A separate type from
+# xrom_avfd_config_file because the two have different failure modes — a corrupt
+# avf.json makes the daemon fall back to its compiled-in fail-safe defaults,
+# while a corrupt trust file must make it refuse to launch anything at all — and
+# because nothing else in the system has any reason to read a signing anchor.
+type xrom_payload_trust_file, file_type, system_file_type;
+
+# /data/misc/xrom/sentinel and everything under it
+# Sentinel state: incident records, the staged evidence copy, the lockdown marker
+# and the quarantine notice.
+#
+# A SEPARATE TYPE FROM xrom_avfd_data_file, AND NOT FOR TIDINESS. The existing
+# file_contexts entry labels /data/misc/xrom(/.*)? as xrom_avfd_data_file, and the
+# existing private policy carries
+#
+#     neverallow { domain -xrom_avfd -init } xrom_avfd_data_file:file { open create write append };
+#
+# If the sentinel's directory inherited that label, the sentinel writing its own
+# incident log would violate a neverallow that this project is explicitly required not
+# to contradict — a policy build failure, and a correct one. A more specific
+# file_contexts entry wins over the shorter prefix, so the subtree gets its own type
+# and its own matching neverallow below.
+type xrom_sentinel_data_file, file_type, data_file_type, core_data_file_type;
+
+# /dev/block/by-name/xrom_vault
+# The recovery fallback image partition. Writable by exactly one domain in the whole
+# policy, xrom_ota_installer, with a neverallow enforcing it.
+type xrom_vault_device, dev_type, block_device;
+
+# /dev/block/by-name/xrom_vault_meta
+# 64 KiB holding the VaultRecord: state, digests, package identity, and the sentinel's
+# own boot-loop counter. Separate from the image partition because SELinux labels block
+# devices and cannot distinguish one offset from another — a record the sentinel must
+# write cannot live on a partition only the installer may write. See correction #5.
+type xrom_vault_meta_device, dev_type, block_device;
+
+# /system_ext/etc/xrom/ota-trust
+# OTA trust material: ota_trust_anchors.json, holding the pinned Ed25519 and
+# RSA-4096 public keys that update.json and the package are verified against.
+#
+# A SEPARATE TYPE FROM xrom_payload_trust_file, and the separation is enforced rather
+# than conventional: xrom_ota_installer is denied the payload anchors and xrom_sentineld
+# is denied both. Different keys, different rotation schedules, and a compromise of the
+# OTA path must not reach the keys that decide what may run inside a pVM.
+type xrom_ota_trust_file, file_type, system_file_type;

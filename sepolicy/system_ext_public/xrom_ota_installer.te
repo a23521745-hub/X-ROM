@@ -1,0 +1,36 @@
+#
+# Copyright (C) 2026 The X-ROM Project
+# SPDX-License-Identifier: Apache-2.0
+#
+# system_ext_public/xrom_ota_installer.te — the only domain that may write the vault.
+#
+# This domain exists to hold exactly one permission: blk_file write on
+# xrom_vault_device. Nothing else in the system has it, and the private policy carries
+# a neverallow that says so in a form the build enforces rather than a comment that
+# asks for it.
+#
+# WHY "READ-ONLY WHEN THE PROCESS EXITS" IS NOT A SELINUX FEATURE
+# ---------------------------------------------------------------
+# The requirement this implements was phrased as "the vault becomes read-only when the
+# OTA installer process exits". SELinux has no such mechanism: policy is static, a
+# domain either holds a permission or it does not, and nothing about it changes with a
+# process lifetime. There is no conditional permission and no time-based rule.
+#
+# The equivalent that does work, and that this policy implements:
+#   1. the vault image partition is mounted ro and is never mounted rw — it is written
+#      through the block device, which is how update_engine writes an inactive slot;
+#   2. exactly one domain holds write, so "read-only" is true of every other domain at
+#      every moment, not only after an exit;
+#   3. the vault is covered by its own AVB hashtree descriptor, so a write that did not
+#      come with a matching signed vbmeta is detected at the next boot rather than
+#      trusted.
+# Together those are strictly stronger than the phrased requirement: the vault is not
+# read-only after the installer exits, it is read-only always and writable only through
+# one auditable path.
+#
+# See correction #5 in docs/05.
+#
+
+type xrom_ota_installer, domain;
+# /system_ext/bin/xrom_ota_installer.
+type xrom_ota_installer_exec, exec_type, file_type, system_file_type;

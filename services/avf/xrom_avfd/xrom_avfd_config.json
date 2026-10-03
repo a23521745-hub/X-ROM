@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "X-ROM AVF daemon configuration. Installed to /system_ext/etc/xrom/avf.json,",
+    "labelled xrom_avfd_config_file, readable only by the xrom_avfd domain.",
+    "",
+    "This file may only make the policy stricter. Every value is clamped to a",
+    "compiled-in ceiling by DaemonConfig::Load(), and a missing, oversized or",
+    "malformed file falls back to fail-safe defaults rather than being partially",
+    "applied. The per-task-class table is deliberately not here: it lives in",
+    "IsolationPolicy::DefaultOptions() so that changing it requires a signed image",
+    "update instead of an edit to a config file."
+  ],
+
+  "_allow_debuggable_vm": "Permits DebugLevel.FULL VMs, which expose a guest adb shell and full kernel logs. Requires a userdebug or eng build as well; this flag alone is never sufficient on a user build.",
+  "allow_debuggable_vm": false,
+
+  "_max_concurrent_vms": "Hard ceiling on simultaneously admitted tasks. Ceiling: 4. Fail-safe default: 1.",
+  "max_concurrent_vms": 2,
+
+  "_memory_budget_mib": "Total guest RAM across all running VMs. Ceiling: 4096. Fail-safe default: 512.",
+  "memory_budget_mib": 1024,
+
+  "_instance_image_bytes": "Size of the per-VM instance.img. Must be a multiple of 4096. Ceiling: 536870912. Fail-safe default: 67108864.",
+  "instance_image_bytes": 67108864,
+
+  "_allowed_uids": "UIDs permitted to submit tasks at all. uid 0 is rejected here on principle; IsolationPolicy admits it separately on debuggable builds only.",
+  "allowed_uids": [1000],
+
+  "_vm_launch_timeout_ms": "How long to wait for microdroid_launcher to start the payload. A Microdroid boot is well under this on supported hardware; exceeding it means the VM is wedged and gets torn down.",
+  "vm_launch_timeout_ms": 30000,
+
+  "_task_timeout_ms": "How long a payload may run once ready.",
+  "task_timeout_ms": 120000
+}

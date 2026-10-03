@@ -1,0 +1,55 @@
+{
+    "_comment": [
+        "OTA trust anchors for update.json and the OTA package.",
+        "",
+        "WHAT THIS FILE IS",
+        "The pinned public keys that xrom_ota_installer and the recovery gate verify",
+        "against. Installed to /system_ext/etc/xrom/ota-trust/ota_trust_anchors.json on",
+        "an AVB-verified, dm-verity-covered, read-only partition and labelled",
+        "xrom_ota_trust_file. There is no code path anywhere in this tree that adds an",
+        "anchor from a fetched file, from a partition an OTA writes, or from a system",
+        "property. A trust anchor that can be loaded at runtime is not a trust anchor.",
+        "",
+        "WHY A SEPARATE FILE FROM security/payload_trust/trust_anchors.json",
+        "Different keys, different rotation schedule, different consumers. sepolicy",
+        "denies xrom_ota_installer access to the payload anchors, so compromising the",
+        "OTA path cannot reach the keys that decide what may run inside a pVM.",
+        "",
+        "WHY TWO ENTRIES PER RELEASE",
+        "require_dual_signature is on by default, so a manifest and its package need",
+        "BOTH an Ed25519 and an RSA-4096 signature under two DISTINCT key ids. The AND",
+        "does not defend against Ed25519 being broken; it defends against a bug in one",
+        "verification path and against the compromise of one signing key, which are the",
+        "two failures that actually happen. The cost is real and should not be hidden:",
+        "two keys, two ceremonies, two rotation schedules, and a signing tool that fails",
+        "if either one is missing. See correction #8 in docs/05.",
+        "",
+        "THESE ARE DEVELOPMENT KEYS",
+        "Both entries are enabled because a build with no enabled anchor cannot install",
+        "anything, which is the correct state for a release build with no real keys but",
+        "not a usable state for bring-up. The private halves were generated outside this",
+        "repository and are NOT committed; only the public halves are. Before a release",
+        "image is built both entries must be replaced with production keys, and",
+        "tools/xrom_preflight.py fails the build if a development anchor is still enabled."
+    ],
+    "anchors": [
+        {
+            "key_id": "xrom-ota-dev-ed25519-01",
+            "algorithm": "ED25519",
+            "purpose": "OTA manifest and package signature",
+            "enabled": true,
+            "min_security_version": 0,
+            "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6Svqo+2KZftLVyqjbbTIHNNTYQJ7L87sndBWdWJ5OPk=\n-----END PUBLIC KEY-----",
+            "_note": "DEVELOPMENT KEY. Replace before release."
+        },
+        {
+            "key_id": "xrom-ota-dev-rsa4096-01",
+            "algorithm": "RSA4096_SHA256",
+            "purpose": "OTA manifest and package signature (second of the dual pair)",
+            "enabled": true,
+            "min_security_version": 0,
+            "public_key": "-----BEGIN PUBLIC KEY-----\nMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAmmHkHSlE9U4x4qtNZSr4\nyojz9loqeNTvRjfpeixfRNm8MSqj2baLVCj0to58LkubGt51u7zlA5pGuwIcQNfM\nrbdtgHBv1+BQLhxFjSQsXk0mrH2ldibxSB8KFOtS6YLZzkzndz4EID2oQcoSaiaq\nTsDYf1ueEObilRYONO0hq40+rX4JTtwRcC+IHaMFHMzT6TrW2VuM/EdJONZt97Ut\nxOHFlTJtylsB9eMqg9xWD0RpfZ2JaDt8ZwQWW4+tzjjZyRLYkXEZEvpn1LGQLqiu\nhz3jXlZt+0roQNZXY2cR1haiateKkE26AqaT3vSJsVz4Lwwg2pHr0hIDG0eclyx7\nZpHpakCFBm6j2Ke2oXYokSTdTOa9q3/hm+aSvJUOZssn48uaGmc2B2tX6FMlHzFq\nnS48Jz2lRkMi3gsKn6ZjsBlvmPyDh6lPhnG0+O8XTxHlJ8sGEkF7+0o7rBtFdk1m\nTW2ojS+yiRucuuCIkY74kUdpSdL/hd7L8QbcJhEh5iuryIJNSzy0RqoM0vF83eJ3\nZYbJz7sxlQwzeNFM7yjKjsZa6YREOVc53b6F2pUbM8m1vwHmuSMRSipBTRkMAXH5\n5DQfAw0dyxOc4IzY6jfunLhGvBLzOhSWHevYZo2SbCNQr1F2TxqhZa7cgIgR7qFW\n4uHF3osUok5f5dQU5wAmMlcCAwEAAQ==\n-----END PUBLIC KEY-----",
+            "_note": "DEVELOPMENT KEY, 4096-bit modulus. Replace before release."
+        }
+    ]
+}
