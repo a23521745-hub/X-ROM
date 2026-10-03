@@ -140,6 +140,51 @@ BOARD_BUILD_SUPER_IMAGE_BY_DEFAULT := true
 BOARD_USES_METADATA_PARTITION := true
 BOARD_USES_VENDOR_DLKMIMAGE := true
 
+# ===========================================================================
+# 5b. xrom_vault — the recovery fallback partition
+# ===========================================================================
+# A raw partition holding a known-good copy of the system image, plus 64 KiB of
+# metadata describing it. Written by xrom_ota_installer and by nothing else; read by
+# xrom_sentineld for the post-boot comparison and by the recovery gate as the
+# fallback source.
+#
+# TWO PARTITIONS, NOT ONE, AND THE SPLIT IS FORCED BY SELINUX
+# -----------------------------------------------------------
+# The record could have lived at offset 0 of the image partition. It cannot, because
+# the sentinel has to write its own boot-loop counter into that record and SELinux
+# labels block devices rather than offsets: one device would mean either the sentinel
+# gets write to the whole image, or it cannot keep its counter. The first destroys the
+# property the design rests on — that exactly one domain can write the fallback — and
+# the second makes the boot-loop guard unable to count. Sixty-four kilobytes is
+# cheaper than either. See correction #5 in docs/05.
+#
+# DELIBERATELY OUTSIDE SUPER
+# --------------------------
+# It is a fixed partition in the device's partition table, not a dynamic partition in
+# the super group. It has to survive a rewrite of super, because a fallback that lives
+# inside the thing it is a fallback for is not a fallback. That also means the board
+# must provide the space: BOARD_XROM_VAULTIMAGE_PARTITION_SIZE below is the size X-ROM
+# asks for, and a real board has to have it in its GPT. On the generic profile used for
+# bring-up it is declared and the image is built but not flashed anywhere meaningful,
+# which is why tools/xrom_avf_verify.sh section 12 checks for the partition on the
+# device rather than trusting this file.
+BOARD_XROM_VAULTIMAGE_PARTITION_SIZE := 0xE0000000
+BOARD_XROM_VAULT_META_PARTITION_SIZE := 0x00010000
+
+# The vault is covered by AVB with its own hashtree descriptor. This is what turns the
+# post-boot comparison from "two stored digests agree" into "two authenticated digests
+# agree", and it is the reason the cheap comparison is sufficient: without AVB over the
+# vault there is no cheap digest for it at all, only a full hash of a multi-gigabyte
+# partition. See corrections #5 and #9 in docs/05.
+#
+# Rollback index location 4 continues the sequence used by system (1), system_ext (2)
+# and vendor (3) above; two locations must not collide or the anti-rollback check
+# compares unrelated counters.
+BOARD_AVB_XROM_VAULT_KEY_PATH := external/avb/test/data/testkey_rsa4096.pem
+BOARD_AVB_XROM_VAULT_ALGORITHM := SHA256_RSA4096
+BOARD_AVB_XROM_VAULT_ROLLBACK_INDEX := $(PLATFORM_SECURITY_PATCH_TIMESTAMP)
+BOARD_AVB_XROM_VAULT_ROLLBACK_INDEX_LOCATION := 4
+
 BOARD_SYSTEMIMAGE_FILE_SYSTEM_TYPE := $(XROM_SYSTEM_FS_TYPE)
 BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_TYPE := $(XROM_SYSTEM_FS_TYPE)
 BOARD_PRODUCTIMAGE_FILE_SYSTEM_TYPE := $(XROM_SYSTEM_FS_TYPE)

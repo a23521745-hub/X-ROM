@@ -30,6 +30,12 @@ allow xrom_ota_installer system_block_device:blk_file { read write open getattr 
 
 binder_use(xrom_ota_installer)
 
+# Reads its own pinned anchors, and nothing else under /system_ext/etc/xrom. The
+# anchors are the only trust input this binary has and they are on a read-only,
+# AVB-verified partition.
+allow xrom_ota_installer xrom_ota_trust_file:dir search;
+allow xrom_ota_installer xrom_ota_trust_file:file { read open getattr };
+
 # Reads the signed manifest and the package it was handed, both of which live on
 # /data or /cache. O_NOFOLLOW and a digest comparison happen in the code; the policy
 # side of that is that this domain cannot reach the payload trust anchors, so a
@@ -61,6 +67,9 @@ neverallow xrom_ota_installer misc_block_device:blk_file { write append };
 # compromise of the installer can cover up.
 neverallow xrom_ota_installer xrom_sentinel_data_file:file { write append create unlink setattr };
 neverallow xrom_ota_installer xrom_payload_trust_file:file { read open getattr };
+# And it may not write its own anchors. A trust anchor a binary can modify is not an
+# anchor; it is a suggestion the binary happens to agree with at the moment.
+neverallow xrom_ota_installer xrom_ota_trust_file:file { write append create unlink setattr };
 
 # No hypervisor, no VM sockets, no module loading, no MAC override. Same argument as
 # the sentinel's list: a domain with one job should not be able to undo the policy

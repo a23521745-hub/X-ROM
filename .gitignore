@@ -77,6 +77,13 @@ compile_commands.json
 # under security/.
 !security/payload_trust/keys/*.pub.pem
 
+# Same rule for the OTA trust material, and for the same reason: these are the public
+# halves of the keys that update.json and the OTA package are verified against, and they
+# have to be in the repository or nobody can check a manifest with
+# tools/xrom_verify_ota.py. Private halves are still caught by *.pem above, because only
+# *.pub.pem is re-included here.
+!security/ota_trust/keys/*.pub.pem
+
 # Editor/OS noise
 .DS_Store
 Thumbs.db

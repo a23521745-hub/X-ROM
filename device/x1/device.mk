@@ -52,6 +52,11 @@ PRODUCT_USE_DYNAMIC_PARTITIONS := true
 $(call inherit-product, vendor/xrom/device/x1/avf.mk)
 
 # ---------------------------------------------------------------------------
+# Self-healing recovery and hybrid OTA
+# ---------------------------------------------------------------------------
+$(call inherit-product, vendor/xrom/device/x1/recovery.mk)
+
+# ---------------------------------------------------------------------------
 # Host-side hardening
 # ---------------------------------------------------------------------------
 # Do not ship a debuggable userspace. A debuggable build relaxes several AVF

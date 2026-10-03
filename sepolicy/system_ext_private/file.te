@@ -64,3 +64,13 @@ type xrom_vault_device, dev_type, block_device;
 # devices and cannot distinguish one offset from another — a record the sentinel must
 # write cannot live on a partition only the installer may write. See correction #5.
 type xrom_vault_meta_device, dev_type, block_device;
+
+# /system_ext/etc/xrom/ota-trust
+# OTA trust material: ota_trust_anchors.json, holding the pinned Ed25519 and
+# RSA-4096 public keys that update.json and the package are verified against.
+#
+# A SEPARATE TYPE FROM xrom_payload_trust_file, and the separation is enforced rather
+# than conventional: xrom_ota_installer is denied the payload anchors and xrom_sentineld
+# is denied both. Different keys, different rotation schedules, and a compromise of the
+# OTA path must not reach the keys that decide what may run inside a pVM.
+type xrom_ota_trust_file, file_type, system_file_type;

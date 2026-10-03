@@ -1,0 +1,65 @@
+// Copyright (C) 2026 The X-ROM Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// xrom_recovery_gate — the recovery-side half of the hybrid decision.
+//
+// recovery: true and recovery_available on the library it links, so that the binary
+// exists INSIDE the recovery image rather than being reached from it. A recovery that
+// has to open the system partition to find out what to do is a recovery that depends on
+// the thing it is being asked to repair.
+//
+// It links the same libxrom_recovery_core that xrom_sentineld links. That is not code
+// reuse for its own sake: it means the decision made in recovery is byte-for-byte the
+// decision previewRecoveryDecision() would have reported from a running system, so a
+// preview taken on a healthy device actually predicts what an incident will do.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_binary {
+    name: "xrom_recovery_gate",
+    recovery: true,
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    local_include_dirs: ["."],
+    srcs: ["main.cpp"],
+    static_libs: [
+        "libxrom_recovery_core",
+        "libxrom_ota_core",
+        "libxrom_sha256",
+    ],
+    shared_libs: [
+        "libbase",
+        "liblog",
+    ],
+}
+
+// The variant installed to /system_ext so that a running system can execute the same
+// decision path for a preview or a manual rehearsal without entering recovery. Same
+// sources, no recovery: true.
+cc_binary {
+    name: "xrom_recovery_gate_host",
+    cpp_std: "c++17",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    local_include_dirs: ["."],
+    srcs: ["main.cpp"],
+    static_libs: [
+        "libxrom_recovery_core",
+        "libxrom_ota_core",
+        "libxrom_sha256",
+    ],
+    shared_libs: [
+        "libbase",
+        "liblog",
+    ],
+    system_ext_specific: true,
+}

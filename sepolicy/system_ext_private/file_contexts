@@ -50,3 +50,8 @@
 # domains under different neverallows.
 /dev/block/by-name/xrom_vault             u:object_r:xrom_vault_device:s0
 /dev/block/by-name/xrom_vault_meta        u:object_r:xrom_vault_meta_device:s0
+
+# OTA trust material. The path must match kDefaultTrustPath in
+# services/ota/xrom_ota_installer/main.cpp; tools/xrom_preflight.py checks that the two
+# agree.
+/system_ext/etc/xrom/ota-trust(/.*)?        u:object_r:xrom_ota_trust_file:s0
